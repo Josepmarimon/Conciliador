@@ -124,7 +124,9 @@ function App() {
             </div>
             <div>
               <h1 style={{ fontSize: '22px', fontWeight: '700', letterSpacing: '-0.03em', margin: 0 }}>Conciliador</h1>
-              <p style={{ fontSize: '13px', color: 'var(--color-label-secondary)', margin: 0 }}>Assessoria Egara</p>
+              <p style={{ fontSize: '13px', color: 'var(--color-label-secondary)', margin: 0 }}>
+                {result?.company_name || 'Assessoria Egara'}
+              </p>
             </div>
           </div>
         </div>
@@ -306,99 +308,6 @@ function App() {
           {/* Results View */}
           {result && (
             <div className="animate-fade-in">
-              <div style={{ marginBottom: '1.5rem' }}>
-                <div style={{ display: 'inline-flex', padding: '0.5rem', borderRadius: '50%', background: 'rgba(0, 158, 115, 0.1)', color: 'var(--success)', marginBottom: '0.5rem' }}>
-                  <CheckCircle size={24} />
-                </div>
-                <h2 style={{ marginBottom: '0.25rem', fontSize: '1.25rem' }}>Conciliación Completada</h2>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Archivo procesado correctamente</p>
-              </div>
-
-              {/* Interactive Tolerance Slider */}
-              <div style={{
-                background: 'rgba(0,0,0,0.3)',
-                padding: '24px',
-                borderRadius: '8px',
-                marginBottom: '24px',
-                border: '1px solid var(--border)',
-                position: 'relative'
-              }}>
-                {isRecalculating && (
-                  <div style={{
-                    position: 'absolute',
-                    top: 0,
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    background: 'rgba(0,0,0,0.5)',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    zIndex: 10
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'white' }}>
-                      <div className="loading-spinner"></div>
-                      Recalculating...
-                    </div>
-                  </div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                  <div style={{ flex: 1 }}>
-                    <label style={{
-                      display: 'block',
-                      fontSize: '0.875rem',
-                      fontWeight: 500,
-                      marginBottom: '12px',
-                      color: 'var(--text-main)'
-                    }}>
-                      Ajuste Interactivo de Tolerancia
-                    </label>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                      <input
-                        type="range"
-                        min="0.01"
-                        max="10"
-                        step="0.01"
-                        value={tol}
-                        onChange={(e) => handleToleranceChange(parseFloat(e.target.value))}
-                        style={{
-                          flex: 1,
-                          height: '4px',
-                          WebkitAppearance: 'none',
-                          appearance: 'none',
-                          background: `linear-gradient(to right, var(--primary) 0%, var(--primary) ${(tol / 10) * 100}%, rgba(255,255,255,0.1) ${(tol / 10) * 100}%, rgba(255,255,255,0.1) 100%)`,
-                          borderRadius: '4px',
-                          outline: 'none',
-                          cursor: 'pointer'
-                        }}
-                      />
-                      <div style={{
-                        minWidth: '100px',
-                        padding: '8px 16px',
-                        background: 'var(--primary)',
-                        borderRadius: '4px',
-                        textAlign: 'center',
-                        fontWeight: 600,
-                        fontSize: '1rem'
-                      }}>
-                        {tol.toFixed(2)} €
-                      </div>
-                    </div>
-                    <div style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      marginTop: '8px',
-                      fontSize: '0.75rem',
-                      color: 'var(--text-muted)'
-                    }}>
-                      <span>0.01€ (estricto)</span>
-                      <span>10€ (flexible)</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               {/* Metrics Grid - Full Width Dashboard */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
                 {/* AR Metrics */}
@@ -566,67 +475,85 @@ function MatchesList({ matches }) {
     <div style={{ display: 'grid', gap: '1.5rem' }}>
       {matches.slice(0, 100).map((set, i) => {
         const tercero = set[0].Tercero;
-        const totalAssigned = set.reduce((sum, row) => sum + Math.abs(row.Asignado || 0), 0);
+
+        // Calculate totals and status
+        const invoiceRows = set.filter(r => r.DocKey && r.PagoKey);
+        const totalPaid = invoiceRows.reduce((sum, row) => sum + Math.abs(row.Asignado || 0), 0);
+        const totalPending = invoiceRows.reduce((sum, row) => sum + (row.ResidualFacturaTras || 0), 0);
+        const hasUnmatched = set.some(r => r.Asignado < 0);
+        const hasPartial = set.some(r => r.ResidualFacturaTras > 0.01);
         const numInvoices = new Set(set.filter(r => r.DocKey).map(r => r.DocKey)).size;
         const numPayments = new Set(set.filter(r => r.PagoKey).map(r => r.PagoKey)).size;
-        const hasUnmatched = set.some(r => r.Asignado < 0);
 
-        // Determine status color
-        let statusColor = 'var(--success)'; // Fully matched
-        let statusBg = 'rgba(0, 158, 115, 0.1)';
-        let statusText = '✓ Conciliado';
-
+        // Determine overall status - VERY CLEAR LOGIC
+        let statusColor, statusBg, statusText, statusIcon;
         if (hasUnmatched) {
-          statusColor = 'var(--error)';
-          statusBg = 'rgba(213, 94, 0, 0.1)';
-          statusText = '⚠ Pagos sin factura';
+          // RED: Payment without invoice
+          statusColor = '#EF4444';
+          statusBg = 'rgba(239, 68, 68, 0.15)';
+          statusText = 'Pago sin Factura';
+          statusIcon = '🔴';
+        } else if (hasPartial || totalPending > 0.01) {
+          // ORANGE: Partial payment
+          statusColor = '#F59E0B';
+          statusBg = 'rgba(245, 158, 11, 0.15)';
+          statusText = 'Pago Parcial';
+          statusIcon = '🟠';
+        } else {
+          // GREEN: Fully paid
+          statusColor = '#10B981';
+          statusBg = 'rgba(16, 185, 129, 0.15)';
+          statusText = 'Totalmente Pagado';
+          statusIcon = '🟢';
         }
 
         return (
           <div key={i} style={{
-            background: i % 2 === 0 ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.05)',
-            borderRadius: '0.75rem',
-            padding: '1.25rem',
-            border: `2px solid ${statusColor}30`,
-            boxShadow: `0 0 0 1px ${statusColor}20`
+            background: 'rgba(0,0,0,0.3)',
+            borderRadius: '12px',
+            padding: '1.5rem',
+            border: `3px solid ${statusColor}`,
+            boxShadow: `0 0 20px ${statusColor}40`
           }}>
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', paddingBottom: '0.75rem', borderBottom: `2px solid ${statusColor}40` }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '1rem', borderBottom: `2px solid ${statusColor}60` }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                 <div style={{
                   background: statusBg,
                   color: statusColor,
-                  padding: '0.25rem 0.75rem',
-                  borderRadius: '1rem',
-                  fontSize: '0.75rem',
-                  fontWeight: 'bold',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '800',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '0.25rem'
+                  gap: '8px',
+                  border: `2px solid ${statusColor}`,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px'
                 }}>
+                  <span style={{ fontSize: '18px' }}>{statusIcon}</span>
                   {statusText}
                 </div>
-                <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '1rem' }}>{tercero}</span>
+                <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '1.1rem' }}>{tercero}</span>
               </div>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  <span style={{ color: 'var(--primary)' }}>📄 {numInvoices}</span> ↔ <span style={{ color: 'var(--secondary)' }}>💳 {numPayments}</span>
-                </div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', background: 'rgba(0,0,0,0.3)', padding: '0.25rem 0.5rem', borderRadius: '0.25rem' }}>
-                  Set #{set[0].SetID}
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                  <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>📄 {numInvoices}</span> ↔ <span style={{ color: '#EC4899', fontWeight: 'bold' }}>💳 {numPayments}</span>
                 </div>
               </div>
             </div>
 
             {/* Table */}
-            <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'separate', borderSpacing: '0 0.25rem' }}>
+            <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'separate', borderSpacing: '0 0.5rem' }}>
               <thead>
-                <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontSize: '0.75rem' }}>
-                  <th style={{ padding: '0.5rem' }}>Tipo</th>
-                  <th style={{ padding: '0.5rem' }}>Fecha</th>
-                  <th style={{ padding: '0.5rem' }}>Document</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'right' }}>Importe</th>
-                  <th style={{ padding: '0.5rem', textAlign: 'center' }}>Estado</th>
+                <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                  <th style={{ padding: '0.75rem' }}>Tipo</th>
+                  <th style={{ padding: '0.75rem' }}>Fecha</th>
+                  <th style={{ padding: '0.75rem' }}>Documento</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'right' }}>Importe Asignado</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'right' }}>Saldo Pendiente</th>
+                  <th style={{ padding: '0.75rem', textAlign: 'center' }}>Estado</th>
                 </tr>
               </thead>
               <tbody>
@@ -635,43 +562,53 @@ function MatchesList({ matches }) {
                   const isPayment = row.PagoKey && !row.DocKey;
                   const isMatch = row.DocKey && row.PagoKey;
                   const isUnmatched = row.Asignado < 0;
+                  const hasPending = row.ResidualFacturaTras > 0.01;
 
-                  let bgColor = 'rgba(0,0,0,0.2)';
-                  let borderLeft = '3px solid transparent';
-
-                  if (isMatch) {
-                    bgColor = 'rgba(0, 158, 115, 0.05)';
-                    borderLeft = '3px solid var(--success)';
-                  } else if (isUnmatched) {
-                    bgColor = 'rgba(213, 94, 0, 0.05)';
-                    borderLeft = '3px solid var(--error)';
+                  // Row-level color coding
+                  let rowBg, rowBorder, rowStatusColor;
+                  if (isUnmatched) {
+                    // RED: Unmatched payment
+                    rowBg = 'rgba(239, 68, 68, 0.1)';
+                    rowBorder = '4px solid #EF4444';
+                    rowStatusColor = '#EF4444';
+                  } else if (hasPending) {
+                    // ORANGE: Partial
+                    rowBg = 'rgba(245, 158, 11, 0.1)';
+                    rowBorder = '4px solid #F59E0B';
+                    rowStatusColor = '#F59E0B';
+                  } else {
+                    // GREEN: OK
+                    rowBg = 'rgba(16, 185, 129, 0.1)';
+                    rowBorder = '4px solid #10B981';
+                    rowStatusColor = '#10B981';
                   }
 
                   return (
                     <tr key={j} style={{
-                      background: bgColor,
-                      borderLeft: borderLeft
+                      background: rowBg,
+                      borderLeft: rowBorder,
+                      borderRadius: '8px'
                     }}>
-                      <td style={{ padding: '0.5rem' }}>
+                      <td style={{ padding: '0.75rem', borderRadius: '8px 0 0 8px' }}>
                         {isMatch && (
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <span style={{ color: 'var(--color-accent-green)' }}>⟷ Match</span>
+                            <span style={{ color: '#10B981', fontWeight: 'bold', fontSize: '0.9rem' }}>⟷ Match</span>
                             {row.MatchMethod && (
                               <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: '600',
-                                padding: '0.125rem 0.375rem',
-                                borderRadius: 'var(--radius-sm)',
+                                fontSize: '0.7rem',
+                                fontWeight: '700',
+                                padding: '2px 8px',
+                                borderRadius: '4px',
                                 background:
-                                  row.MatchMethod === 'Reference' ? 'rgba(48, 209, 88, 0.15)' :
-                                    row.MatchMethod === 'Exact' ? 'rgba(10, 132, 255, 0.15)' :
-                                      row.MatchMethod === 'FIFO' ? 'rgba(191, 90, 242, 0.15)' :
-                                        'rgba(120, 120, 128, 0.15)',
+                                  row.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
+                                    row.MatchMethod === 'Exact' ? 'rgba(59, 130, 246, 0.2)' :
+                                      row.MatchMethod === 'FIFO' ? 'rgba(168, 85, 247, 0.2)' :
+                                        'rgba(120, 120, 128, 0.2)',
                                 color:
-                                  row.MatchMethod === 'Reference' ? 'var(--color-accent-green)' :
-                                    row.MatchMethod === 'Exact' ? 'var(--color-accent-blue)' :
-                                      row.MatchMethod === 'FIFO' ? 'var(--color-accent-purple)' :
-                                        'var(--color-label-secondary)'
+                                  row.MatchMethod === 'Reference' ? '#10B981' :
+                                    row.MatchMethod === 'Exact' ? '#3B82F6' :
+                                      row.MatchMethod === 'FIFO' ? '#A855F7' :
+                                        '#6B7280'
                               }}>
                                 {row.MatchMethod === 'Reference' && '🔗 Ref'}
                                 {row.MatchMethod === 'Exact' && '💯 Exact'}
@@ -681,54 +618,105 @@ function MatchesList({ matches }) {
                             )}
                           </div>
                         )}
-                        {isInvoice && <span style={{ color: 'var(--color-accent-blue)' }}>📄 Fact</span>}
-                        {isPayment && <span style={{ color: 'var(--color-accent-red)' }}>💳 Pago</span>}
+                        {isInvoice && <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>📄 Factura</span>}
+                        {isPayment && <span style={{ color: '#EF4444', fontWeight: 'bold' }}>💳 Pago</span>}
                       </td>
-                      <td style={{ padding: '0.5rem', color: 'var(--text-muted)' }}>
+                      <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
                         {isMatch ? (
-                          <div style={{ fontSize: '0.75rem' }}>
-                            <div>{row.Fecha_doc}</div>
+                          <div style={{ fontSize: '0.8rem' }}>
+                            <div style={{ fontWeight: '600' }}>{row.Fecha_doc}</div>
                             <div style={{ color: 'var(--text-muted)', opacity: 0.7 }}>↓ {row.Fecha_pago}</div>
                           </div>
                         ) : (
                           row.Fecha_doc || row.Fecha_pago || '-'
                         )}
                       </td>
-                      <td style={{ padding: '0.5rem', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '0.75rem', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {isMatch ? (
-                          <div style={{ fontSize: '0.75rem' }}>
-                            <div title={row.DocKey}>{row.DocKey ? row.DocKey.split('|')[1] : '-'}</div>
+                          <div style={{ fontSize: '0.8rem' }}>
+                            <div title={row.DocKey} style={{ fontWeight: '600' }}>{row.DocKey ? row.DocKey.split('|')[1] : '-'}</div>
                             <div style={{ color: 'var(--text-muted)', opacity: 0.7 }} title={row.PagoKey}>{row.PagoKey ? row.PagoKey.split('|')[1] : '-'}</div>
                           </div>
                         ) : (
-                          <span title={row.DocKey || row.PagoKey}>
+                          <span title={row.DocKey || row.PagoKey} style={{ fontSize: '0.85rem' }}>
                             {(row.DocKey || row.PagoKey) ? (row.DocKey || row.PagoKey).split('|')[1] : '-'}
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '0.5rem', textAlign: 'right' }}>
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
                         <div style={{
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '0.25rem',
-                          color: isUnmatched ? 'var(--error)' : 'var(--success)',
-                          fontWeight: 'bold',
-                          background: isUnmatched ? 'rgba(213, 94, 0, 0.1)' : 'rgba(0, 158, 115, 0.1)',
-                          padding: '0.25rem 0.5rem',
-                          borderRadius: '0.25rem',
-                          fontSize: '0.85rem'
+                          gap: '6px',
+                          color: rowStatusColor,
+                          fontWeight: '700',
+                          background: `${rowStatusColor}20`,
+                          padding: '6px 12px',
+                          borderRadius: '6px',
+                          fontSize: '0.95rem',
+                          border: `2px solid ${rowStatusColor}`
                         }}>
-                          {isUnmatched ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
                           {Math.abs(row.Asignado)?.toFixed(2)} €
                         </div>
                       </td>
-                      <td style={{ padding: '0.5rem', textAlign: 'center' }}>
-                        {row.ResidualFacturaTras > 0.01 ? (
-                          <span style={{ fontSize: '0.7rem', color: 'var(--secondary)', background: 'rgba(230, 159, 0, 0.1)', padding: '0.125rem 0.5rem', borderRadius: '0.25rem' }}>
-                            Parcial
+                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
+                        {row.ResidualFacturaTras !== null && row.ResidualFacturaTras !== undefined && !isPayment ? (
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            color: row.ResidualFacturaTras > 0.01 ? '#EF4444' : '#10B981',
+                            fontWeight: '700',
+                            background: row.ResidualFacturaTras > 0.01 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                            padding: '6px 12px',
+                            borderRadius: '6px',
+                            fontSize: '0.95rem',
+                            border: row.ResidualFacturaTras > 0.01 ? '2px solid #EF4444' : '2px solid #10B981'
+                          }}>
+                            {row.ResidualFacturaTras > 0.01 ? <AlertCircle size={14} /> : <CheckCircle size={14} />}
+                            {row.ResidualFacturaTras?.toFixed(2)} €
+                          </div>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
+                        )}
+                      </td>
+                      <td style={{ padding: '0.75rem', textAlign: 'center', borderRadius: '0 8px 8px 0' }}>
+                        {isUnmatched ? (
+                          <span style={{
+                            fontSize: '16px',
+                            fontWeight: '900',
+                            color: '#EF4444',
+                            background: 'rgba(239, 68, 68, 0.2)',
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            border: '2px solid #EF4444'
+                          }}>
+                            🔴 KO
+                          </span>
+                        ) : row.ResidualFacturaTras > 0.01 ? (
+                          <span style={{
+                            fontSize: '16px',
+                            fontWeight: '900',
+                            color: '#F59E0B',
+                            background: 'rgba(245, 158, 11, 0.2)',
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            border: '2px solid #F59E0B'
+                          }}>
+                            🟠 PARCIAL
                           </span>
                         ) : (
-                          <span style={{ fontSize: '0.7rem', color: 'var(--success)' }}>✓</span>
+                          <span style={{
+                            fontSize: '16px',
+                            fontWeight: '900',
+                            color: '#10B981',
+                            background: 'rgba(16, 185, 129, 0.2)',
+                            padding: '4px 12px',
+                            borderRadius: '6px',
+                            border: '2px solid #10B981'
+                          }}>
+                            🟢 OK
+                          </span>
                         )}
                       </td>
                     </tr>
@@ -736,6 +724,44 @@ function MatchesList({ matches }) {
                 })}
               </tbody>
             </table>
+
+            {/* Summary Footer */}
+            <div style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              background: 'rgba(0,0,0,0.4)',
+              borderRadius: '8px',
+              border: `2px solid ${statusColor}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <div style={{ display: 'flex', gap: '2rem' }}>
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pagado</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#10B981' }}>
+                    {totalPaid.toFixed(2)} €
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pendiente</div>
+                  <div style={{ fontSize: '1.25rem', fontWeight: '800', color: totalPending > 0.01 ? '#EF4444' : '#10B981' }}>
+                    {totalPending.toFixed(2)} €
+                  </div>
+                </div>
+              </div>
+              <div style={{
+                fontSize: '1.5rem',
+                fontWeight: '900',
+                color: statusColor,
+                background: statusBg,
+                padding: '12px 24px',
+                borderRadius: '8px',
+                border: `3px solid ${statusColor}`
+              }}>
+                {statusIcon} {statusText}
+              </div>
+            </div>
           </div>
         );
       })}

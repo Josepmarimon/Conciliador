@@ -77,6 +77,34 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
             }
     return schema
 
+def extract_company_name(df_head: pd.DataFrame, header_row: int) -> Optional[str]:
+    """Extract company name from the rows before the header"""
+    if header_row == 0:
+        return None
+    
+    # Look at rows before the header
+    for idx in range(min(header_row, 10)):
+        row = df_head.iloc[idx]
+        # Get non-empty cells
+        non_empty = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip()]
+        
+        # Look for potential company names (longer strings, not numbers, not common header keywords)
+        for val in non_empty:
+            # Skip if it looks like a header keyword or is too short
+            if len(val) < 3 or len(val) > 100:
+                continue
+            # Skip if it's mostly numbers
+            if sum(c.isdigit() for c in val) > len(val) * 0.5:
+                continue
+            # Skip common non-company words
+            if re.search(r'fecha|date|cuenta|account|debe|haber|saldo|balance|total', val, flags=re.IGNORECASE):
+                continue
+            # This looks like a potential company name
+            return val
+    
+    return None
+
+
 class Reconciler:
     def __init__(self, tol: float = 0.01):
         self.tol = tol
@@ -266,21 +294,27 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
     
     return pend[["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"]]
 
-def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict]]:
+def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict], Optional[str]]:
     xls = pd.ExcelFile(io.BytesIO(file_content))
     
     ar_rows = []
     ap_rows = []
     meta_rows = []
+    company_name = None
     
     sheets_to_process = [sheet_filter] if sheet_filter else xls.sheet_names
 
-    for sheet_name in sheets_to_process:
+    for idx, sheet_name in enumerate(sheets_to_process):
         if sheet_name not in xls.sheet_names:
             continue
             
         df_head = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
         header_row = find_header_row(df_head)
+        
+        # Extract company name from first sheet only
+        if idx == 0 and company_name is None:
+            company_name = extract_company_name(df_head, header_row)
+        
         df0 = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
         
         df = normalize_cols(df0)
@@ -426,10 +460,10 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         for r in meta_rows
     ])
     
-    return out_sheets, summary_list
+    return out_sheets, summary_list, company_name
 
 def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str) -> Tuple[Dict, io.BytesIO]:
-    out_sheets, summary_list = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
+    out_sheets, summary_list, company_name = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
     
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
@@ -481,7 +515,8 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
     raw_response = {
         "summary": summary_list,
         "meta": [], 
-        "details": details
+        "details": details,
+        "company_name": company_name
     }
     
     # Sanitize everything
