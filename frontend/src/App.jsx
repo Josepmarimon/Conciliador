@@ -428,16 +428,6 @@ function App() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: '1rem', justifyContent: 'flex-start', marginTop: '1.5rem' }}>
-                <button className="btn btn-primary" onClick={downloadFile}>
-                  <Download size={20} /> Descargar Excel Detallado
-                </button>
-                <button className="btn btn-secondary" onClick={() => { setResult(null); setFile(null); }}>
-                  Procesar Otro Archivo
-                </button>
-              </div>
-
-
               {/* Visual Reconciliation Details */}
               {result.details && (
                 <ReconciliationDetails details={result.details} />
