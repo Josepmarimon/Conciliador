@@ -466,26 +466,23 @@ function ReconciliationDetails({ details }) {
 
   return (
     <div style={{ marginTop: '3rem' }}>
-      <h2 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '1rem', textAlign: 'center', color: 'var(--text-main)' }}>
-        Detalles de Conciliación
-      </h2>
-      <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '1.5rem' }}>
-        AR = Cuentas por Cobrar (Clientes) | AP = Cuentas por Pagar (Proveedores)
-      </p>
-
       {/* Controls */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '2rem', marginBottom: '2rem' }}>
-        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem', padding: '0.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', marginBottom: '2rem' }}>
+        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: '12px', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
           <button
             onClick={() => setActiveBlock('AR')}
             style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '0.25rem',
+              padding: '12px 32px',
+              borderRadius: '8px',
               border: 'none',
-              background: activeBlock === 'AR' ? 'var(--primary)' : 'transparent',
+              background: activeBlock === 'AR' ? 'linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-purple) 100%)' : 'rgba(255,255,255,0.05)',
               color: 'white',
               cursor: 'pointer',
-              fontWeight: 'bold'
+              fontWeight: '700',
+              fontSize: '15px',
+              transition: 'all 0.2s ease',
+              boxShadow: activeBlock === 'AR' ? '0 4px 12px rgba(10, 132, 255, 0.4)' : 'none',
+              transform: activeBlock === 'AR' ? 'scale(1.02)' : 'scale(1)'
             }}
           >
             Clientes (AR)
@@ -493,29 +490,38 @@ function ReconciliationDetails({ details }) {
           <button
             onClick={() => setActiveBlock('AP')}
             style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '0.25rem',
+              padding: '12px 32px',
+              borderRadius: '8px',
               border: 'none',
-              background: activeBlock === 'AP' ? '#f472b6' : 'transparent',
+              background: activeBlock === 'AP' ? 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' : 'rgba(255,255,255,0.05)',
               color: 'white',
               cursor: 'pointer',
-              fontWeight: 'bold'
+              fontWeight: '700',
+              fontSize: '15px',
+              transition: 'all 0.2s ease',
+              boxShadow: activeBlock === 'AP' ? '0 4px 12px rgba(236, 72, 153, 0.4)' : 'none',
+              transform: activeBlock === 'AP' ? 'scale(1.02)' : 'scale(1)'
             }}
           >
             Proveedores (AP)
           </button>
         </div>
 
-        <div style={{ display: 'flex', background: 'rgba(255,255,255,0.05)', borderRadius: '0.5rem', padding: '0.25rem' }}>
+        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: '12px', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
           <button
             onClick={() => setActiveTab('matches')}
             style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '0.25rem',
+              padding: '12px 32px',
+              borderRadius: '8px',
               border: 'none',
-              background: activeTab === 'matches' ? 'var(--secondary)' : 'transparent',
+              background: activeTab === 'matches' ? 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' : 'rgba(255,255,255,0.05)',
               color: 'white',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              fontWeight: '700',
+              fontSize: '15px',
+              transition: 'all 0.2s ease',
+              boxShadow: activeTab === 'matches' ? '0 4px 12px rgba(16, 185, 129, 0.4)' : 'none',
+              transform: activeTab === 'matches' ? 'scale(1.02)' : 'scale(1)'
             }}
           >
             Emparejados
@@ -523,12 +529,17 @@ function ReconciliationDetails({ details }) {
           <button
             onClick={() => setActiveTab('pending')}
             style={{
-              padding: '0.5rem 1.5rem',
-              borderRadius: '0.25rem',
+              padding: '12px 32px',
+              borderRadius: '8px',
               border: 'none',
-              background: activeTab === 'pending' ? 'var(--secondary)' : 'transparent',
+              background: activeTab === 'pending' ? 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)' : 'rgba(255,255,255,0.05)',
               color: 'white',
-              cursor: 'pointer'
+              cursor: 'pointer',
+              fontWeight: '700',
+              fontSize: '15px',
+              transition: 'all 0.2s ease',
+              boxShadow: activeTab === 'pending' ? '0 4px 12px rgba(245, 158, 11, 0.4)' : 'none',
+              transform: activeTab === 'pending' ? 'scale(1.02)' : 'scale(1)'
             }}
           >
             Pendientes
