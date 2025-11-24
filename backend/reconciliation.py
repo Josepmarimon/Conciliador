@@ -1,0 +1,490 @@
+import pandas as pd
+import numpy as np
+import re
+import io
+from typing import List, Dict, Tuple, Optional, Any
+
+def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+    lower_map = {c: re.sub(r"\s+", " ", str(c)).strip().lower() for c in df.columns}
+    df.rename(columns=lower_map, inplace=True)
+    return df
+
+def find_col(df: pd.DataFrame, patterns: List[str]) -> Optional[str]:
+    for p in patterns:
+        for c in df.columns:
+            if re.search(p, c, flags=re.IGNORECASE):
+                return c
+    return None
+
+def find_cols(df: pd.DataFrame, patterns: List[str]) -> List[str]:
+    out = []
+    for c in df.columns:
+        for p in patterns:
+            if re.search(p, c, flags=re.IGNORECASE):
+                out.append(c)
+                break
+    return list(dict.fromkeys(out))
+
+def find_header_row(df_head: pd.DataFrame) -> int:
+    best_idx = 0
+    max_score = 0
+    keywords = [r"fecha", r"date", r"cuenta", r"account", r"debe", r"debit", r"haber", r"credit", r"saldo", r"balance"]
+    
+    for idx, row in df_head.iterrows():
+        row_str = " ".join([str(x).lower() for x in row.values])
+        score = 0
+        for kw in keywords:
+            if re.search(kw, row_str):
+                score += 1
+        if score > max_score:
+            max_score = score
+            best_idx = idx
+            
+    if max_score < 2: 
+        return 0
+    return best_idx
+
+def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
+    date_col   = find_col(df, [r"fecha", r"date", r"f\.?contab", r"asiento.*fecha"])
+    cuenta_col = find_col(df, [r"cuenta", r"cta", r"account", r"cod.*cta"])
+    debe_col   = find_col(df, [r"debe", r"cargo", r"debit"])
+    haber_col  = find_col(df, [r"haber", r"abono", r"credit"])
+    saldo_col  = find_col(df, [r"saldo", r"balance"])
+    tercero_col= find_col(df, [r"descripci[oó]n", r"proveedor", r"cliente", r"tercero", r"contrapartida", r"nombre", r"raz[oó]n\s*social"])
+    doc_col    = find_col(df, [r"factura", r"documento", r"n[ºo]\s*doc", r"n[úu]mero", r"ref"])
+    concepto_col=find_col(df, [r"concepto", r"desc", r"glosa", r"detalle", r"narr"])
+    
+    schema = {
+        "fecha": date_col, "cuenta": cuenta_col, "debe": debe_col, "haber": haber_col,
+        "saldo": saldo_col, "tercero": tercero_col, "documento": doc_col, "concepto": concepto_col
+    }
+    
+    # Fallback for headless sheets
+    if not (schema["fecha"] and schema["cuenta"] and (schema["debe"] or schema["haber"])):
+        if len(df.columns) >= 9:
+            cols = list(df.columns)
+            schema = {
+                "cuenta": cols[0],
+                "tercero": cols[1],
+                "fecha": cols[3],
+                "concepto": cols[4],
+                "documento": cols[5],
+                "debe": cols[6],
+                "haber": cols[7],
+                "saldo": cols[8]
+            }
+    return schema
+
+class Reconciler:
+    def __init__(self, tol: float = 0.01):
+        self.tol = tol
+        self.open_invoices = []  # List of dicts
+        self.out_rows = []
+        self.set_id = 0
+        
+    def add_invoice(self, row):
+        self.open_invoices.append({
+            "doc_key": row["doc_key"],
+            "remaining": float(row["neto_norm"]),
+            "fecha": row["fecha"],
+            "row_id": row["row_id"],
+            "doc_ref": str(row["doc"]).lower().strip() if row["doc"] else "",
+            "original_row": row
+        })
+
+    def process_payment(self, payment_row, tercero):
+        payment_amount = -float(payment_row["neto_norm"])
+        payment_left = payment_amount
+        payment_concept = str(payment_row["concepto"]).lower() if payment_row["concepto"] else ""
+        
+        matches = [] # List of (invoice_index, amount_to_take, method)
+
+        # --- Phase 1: Reference Match ---
+        # Look for invoice document numbers in payment concept
+        if payment_left > self.tol:
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] <= self.tol:
+                    continue
+                
+                # Check if doc ref is present in payment concept (and is not empty/short)
+                # We require at least 3 chars to avoid matching "1", "A", etc.
+                if len(inv["doc_ref"]) >= 3 and inv["doc_ref"] in payment_concept:
+                    take = min(inv["remaining"], payment_left)
+                    matches.append((idx, take, "Reference"))
+                    inv["remaining"] -= take
+                    payment_left -= take
+                    if payment_left <= self.tol:
+                        break
+
+        # --- Phase 2: Exact Amount Match ---
+        # Look for a single invoice with the exact remaining payment amount
+        if payment_left > self.tol:
+            best_match_idx = -1
+            
+            # Find invoices with exact amount
+            candidates = []
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] <= self.tol:
+                    continue
+                if abs(inv["remaining"] - payment_left) <= self.tol:
+                    candidates.append(idx)
+            
+            # If we found exactly one or more, pick the first one (oldest due to sort)
+            # Strategy: If multiple exact matches, FIFO among them is fine.
+            if candidates:
+                best_match_idx = candidates[0]
+                take = payment_left # It's a full match
+                matches.append((best_match_idx, take, "Exact"))
+                self.open_invoices[best_match_idx]["remaining"] -= take
+                payment_left -= take
+
+        # --- Phase 3: FIFO Fallback ---
+        if payment_left > self.tol:
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] <= self.tol:
+                    continue
+                
+                take = min(inv["remaining"], payment_left)
+                matches.append((idx, take, "FIFO"))
+                inv["remaining"] -= take
+                payment_left -= take
+                if payment_left <= self.tol:
+                    break
+        
+        # --- Record Results ---
+        # We need to record matches. Note that one payment might match multiple invoices (mixed methods)
+        for idx, take, method in matches:
+            inv = self.open_invoices[idx]
+            self.out_rows.append({
+                "SetID": self.set_id,
+                "Tercero": tercero,
+                "Fecha_doc": inv["fecha"],
+                "Fecha_pago": payment_row["fecha"],
+                "DocKey": inv["doc_key"],
+                "PagoKey": payment_row["doc_key"],
+                "Asignado": take,
+                "ResidualFacturaTras": inv["remaining"],
+                "Hoja_doc": inv["original_row"]["hoja"],
+                "Hoja_pago": payment_row["hoja"],
+                "MatchMethod": method
+            })
+
+        # Cleanup fully paid invoices
+        self.open_invoices = [inv for inv in self.open_invoices if inv["remaining"] > self.tol]
+
+        # Handle Unallocated Payment
+        if payment_left > self.tol:
+            self.out_rows.append({
+                "SetID": self.set_id,
+                "Tercero": tercero,
+                "Fecha_doc": pd.NaT,
+                "Fecha_pago": payment_row["fecha"],
+                "DocKey": None,
+                "PagoKey": payment_row["doc_key"],
+                "Asignado": -payment_left,
+                "ResidualFacturaTras": np.nan,
+                "Hoja_doc": None,
+                "Hoja_pago": payment_row["hoja"],
+                "MatchMethod": "Unallocated"
+            })
+            
+        # Check if set is closed (no open invoices and no running payment)
+        # In this row-by-row logic, we check if we are "clean".
+        # Actually, SetID logic in original code was based on running sum being 0.
+        # Here, we increment SetID if we have no open invoices.
+        # But wait, if we have unallocated payment, we are not "clean".
+        # Let's keep it simple: if no open invoices, we bump SetID. 
+        # (This might split related groups if payment comes before invoice, but standard accounting usually has inv first)
+        if not self.open_invoices:
+            self.set_id += 1
+
+    def flush_remaining(self, tercero):
+        # Output remaining open invoices as unallocated
+        for inv in self.open_invoices:
+            self.out_rows.append({
+                "SetID": self.set_id,
+                "Tercero": tercero,
+                "Fecha_doc": inv["fecha"],
+                "Fecha_pago": pd.NaT,
+                "DocKey": inv["doc_key"],
+                "PagoKey": None,
+                "Asignado": 0.0,
+                "ResidualFacturaTras": inv["remaining"],
+                "Hoja_doc": inv["original_row"]["hoja"],
+                "Hoja_pago": None,
+                "MatchMethod": "Open"
+            })
+
+def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
+    all_rows = []
+    
+    # Work per tercero
+    # Sort by date to ensure chronological processing
+    for tercero, g in df.sort_values(["tercero", "fecha", "idx"]).groupby(["tercero"], dropna=False):
+        reconciler = Reconciler(tol=tol)
+        
+        for _, row in g.iterrows():
+            amount = float(row["neto_norm"] or 0.0)
+            if amount > 0:
+                reconciler.add_invoice(row)
+            elif amount < 0:
+                reconciler.process_payment(row, tercero)
+        
+        reconciler.flush_remaining(tercero)
+        all_rows.extend(reconciler.out_rows)
+            
+    return pd.DataFrame(all_rows)
+
+def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
+    if det.empty:
+        return pd.DataFrame(columns=["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"])
+    
+    # Get last status of each doc
+    # Filter only invoice allocations or open invoices
+    inv_allocs = det[det["DocKey"].notna()].copy()
+    if inv_allocs.empty:
+        return pd.DataFrame(columns=["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"])
+        
+    inv_allocs.sort_values(["SetID", "Fecha_pago"], inplace=True)
+    last_status = inv_allocs.drop_duplicates(subset=["DocKey"], keep="last")
+    
+    pend = last_status[last_status["ResidualFacturaTras"] > tol].copy()
+    
+    if pend.empty:
+        return pd.DataFrame(columns=["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"])
+
+    today = pd.Timestamp.today().normalize()
+    pend["Dias"] = (today - pend["Fecha_doc"]).dt.days
+    
+    # Select and rename columns as requested
+    pend = pend.rename(columns={
+        "ResidualFacturaTras": "ImportePendiente",
+        "Fecha_doc": "Fecha"
+    })
+    
+    return pend[["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"]]
+
+def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict]]:
+    xls = pd.ExcelFile(io.BytesIO(file_content))
+    
+    ar_rows = []
+    ap_rows = []
+    meta_rows = []
+    
+    sheets_to_process = [sheet_filter] if sheet_filter else xls.sheet_names
+
+    for sheet_name in sheets_to_process:
+        if sheet_name not in xls.sheet_names:
+            continue
+            
+        df_head = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
+        header_row = find_header_row(df_head)
+        df0 = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
+        
+        df = normalize_cols(df0)
+        sch = detect_schema(df)
+        
+        meta_info = {
+            "Hoja": sheet_name,
+            "Header_Row": header_row,
+            "Filas_Raw": len(df),
+            "Columnas_Detectadas": {k: v for k, v in sch.items() if v}
+        }
+        
+        if sch["cuenta"]:
+            df[sch["cuenta"]] = df[sch["cuenta"]].ffill()
+        if sch["tercero"]:
+            df[sch["tercero"]] = df[sch["tercero"]].ffill()
+            
+        for c in [sch["debe"], sch["haber"], sch["saldo"]]:
+            if c:
+                df[c] = pd.to_numeric(df[c], errors="coerce")
+                
+        net_col = None
+        if sch["debe"] and sch["haber"]:
+            net_col = "_neto_"
+            df[net_col] = df[sch["debe"]].fillna(0) - df[sch["haber"]].fillna(0)
+        else:
+            importe_cols = find_cols(df, [r"importe|monto|amount"])
+            if len(importe_cols)==1:
+                net_col = importe_cols[0]
+                df[net_col] = pd.to_numeric(df[net_col], errors="coerce")
+            else:
+                net_col = None
+                
+        meta_info["Neto_Column"] = net_col
+
+        if sch["cuenta"] is None or net_col is None:
+            meta_info["Error"] = "Falta columna Cuenta o Neto"
+            meta_rows.append(meta_info)
+            continue
+            
+        if sch["fecha"]:
+            if not np.issubdtype(df[sch["fecha"]].dtype, np.datetime64):
+                df[sch["fecha"]] = pd.to_datetime(df[sch["fecha"]], dayfirst=True, errors="coerce")
+            df = df[df[sch["fecha"]].notna()].copy()
+            
+        meta_info["Filas_Procesables"] = len(df)
+
+        df["_collective"] = df[sch["cuenta"]].astype(str).str.strip().apply(
+            lambda s: "AR" if s.startswith(ar_prefix) else ("AP" if s.startswith(ap_prefix) else "OTROS")
+        )
+        
+        counts = df["_collective"].value_counts().to_dict()
+        meta_info["Filas_AR"] = counts.get("AR", 0)
+        meta_info["Filas_AP"] = counts.get("AP", 0)
+        meta_rows.append(meta_info)
+
+        df["_tercero"] = df[sch["tercero"]] if sch["tercero"] else np.nan
+        df["_doc"] = df[sch["documento"]] if sch["documento"] else np.nan
+        df["_concepto"] = df[sch["concepto"]] if sch["concepto"] else np.nan
+        df["_fecha"] = df[sch["fecha"]] if sch["fecha"] else pd.NaT
+
+        for coll, sub in df[df["_collective"].isin(["AR","AP"])].copy().groupby("_collective"):
+            sub = sub.reset_index(drop=True)
+            net = sub[net_col].fillna(0).astype(float)
+            if coll == "AR":
+                net_norm = net # AR: Invoice > 0
+            else:
+                net_norm = -net # AP: Invoice > 0 (usually Credit in accounting, so we invert)
+
+            work = pd.DataFrame({
+                "hoja": sheet_name,
+                "fecha": sub["_fecha"],
+                "tercero": sub["_tercero"].astype(str).replace({"nan": None}),
+                "doc": sub["_doc"].astype(str).replace({"nan": None}),
+                "concepto": sub["_concepto"].astype(str).replace({"nan": None}),
+                "cuenta": sub[sch["cuenta"]].astype(str),
+                "neto": net,
+                "neto_norm": net_norm,
+            })
+            work["row_id"] = work.index.values
+            work["doc_key"] = work.apply(
+                lambda r: (r["tercero"] or "") + " | " + (r["doc"] or f"{str(r['fecha'])[:10]}") + " | " + (r["cuenta"] or "") + " | " + f"{r['neto_norm']:+.2f}",
+                axis=1
+            )
+            if work["fecha"].isna().all():
+                work["fecha"] = pd.Timestamp("1900-01-01")
+            
+            if coll == "AR":
+                ar_rows.append(work)
+            else:
+                ap_rows.append(work)
+
+    out_sheets = {}
+    
+    # AR Processing
+    det_ar = pd.DataFrame()
+    if ar_rows:
+        ar_all = pd.concat(ar_rows, ignore_index=True)
+        ar_all["idx"] = np.arange(len(ar_all))
+        det_ar = reconcile_fifo(ar_all, tol=tol)
+        out_sheets["AR_Detalle"] = det_ar
+        out_sheets["Pendientes_AR"] = build_pendientes(det_ar, tol)
+
+    # AP Processing
+    det_ap = pd.DataFrame()
+    if ap_rows:
+        ap_all = pd.concat(ap_rows, ignore_index=True)
+        ap_all["idx"] = np.arange(len(ap_all))
+        det_ap = reconcile_fifo(ap_all, tol=tol)
+        out_sheets["AP_Detalle"] = det_ap
+        out_sheets["Pendientes_AP"] = build_pendientes(det_ap, tol)
+
+    # Summary
+    def quick_summary(df: pd.DataFrame, name: str, pend_sheet: str) -> Dict:
+        if df.empty:
+            return {
+                "Bloque": name,
+                "Asignado": 0.0,
+                "Pagos_sin_factura": 0.0,
+                "Docs_pendientes": 0
+            }
+        
+        conciliado = df["Asignado"].where(df["Asignado"]>0, 0).sum()
+        sin_factura = df["Asignado"].where(df["Asignado"]<0, 0).sum()
+        pend_df = out_sheets.get(pend_sheet, pd.DataFrame())
+        num_pendientes = len(pend_df)
+        
+        return {
+            "Bloque": name,
+            "Asignado": round(conciliado, 2),
+            "Pagos_sin_factura": round(sin_factura, 2),
+            "Docs_pendientes": int(num_pendientes)
+        }
+
+    summary_list = [
+        quick_summary(det_ar, "AR", "Pendientes_AR"),
+        quick_summary(det_ap, "AP", "Pendientes_AP")
+    ]
+    
+    out_sheets["Resumen"] = pd.DataFrame(summary_list)
+    out_sheets["Meta"] = pd.DataFrame([
+        {k: str(v) if isinstance(v, dict) else v for k, v in r.items()} 
+        for r in meta_rows
+    ])
+    
+    return out_sheets, summary_list
+
+def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str) -> Tuple[Dict, io.BytesIO]:
+    out_sheets, summary_list = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
+    
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        for name, data in out_sheets.items():
+            data.to_excel(writer, sheet_name=name[:31], index=False)
+    
+    output.seek(0)
+    
+    # Final robust sanitization for JSON
+    # Final robust sanitization for JSON
+    def recursive_sanitize(obj):
+        if isinstance(obj, dict):
+            return {k: recursive_sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [recursive_sanitize(v) for v in obj]
+        elif isinstance(obj, (float, np.floating)):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return float(obj)
+        elif isinstance(obj, (int, np.integer)):
+            return int(obj)
+        elif pd.isna(obj): # Catch pandas NaT/NaN/None
+            return None
+        return obj
+
+    # Convert DataFrames to dict records for JSON response
+    details = {}
+    for name, df in out_sheets.items():
+        if name in ["AR_Detalle", "AP_Detalle", "Pendientes_AR", "Pendientes_AP"]:
+            # Create a copy to avoid SettingWithCopy warnings
+            df_clean = df.copy()
+            
+            # Replace Infinity with NaN first (numpy types)
+            df_clean.replace([np.inf, -np.inf], np.nan, inplace=True)
+            
+            # Convert dates to string ISO format BEFORE replacing NaNs with None
+            # because datetime columns with None might be tricky
+            for col in df_clean.columns:
+                if pd.api.types.is_datetime64_any_dtype(df_clean[col]):
+                    df_clean[col] = df_clean[col].dt.strftime('%Y-%m-%d')
+            
+            # Now replace all NaN (including those from Inf) with None
+            # We use where(pd.notnull(df), None) pattern which is robust
+            df_clean = df_clean.where(pd.notnull(df_clean), None)
+            
+            details[name] = df_clean.to_dict(orient="records")
+
+    # Construct raw response
+    raw_response = {
+        "summary": summary_list,
+        "meta": [], 
+        "details": details
+    }
+    
+    # Sanitize everything
+    clean_response = recursive_sanitize(raw_response)
+
+    return clean_response, output
