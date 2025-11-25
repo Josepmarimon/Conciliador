@@ -945,10 +945,10 @@ function MatchesList({ matches, justifications, setJustifications }) {
                             borderTop: '1px solid rgba(255,255,255,0.1)'
                           }}>
                             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
-                              <div><strong>Cuenta:</strong> {invoice.Cuenta}</div>
+                              <div><strong>Cuenta:</strong> {invoice.Cuenta_doc || '-'}</div>
                               <div><strong>Tercero:</strong> {invoice.Tercero}</div>
-                              <div><strong>Documento:</strong> {invoice.Documento || '-'}</div>
-                              <div><strong>Concepto:</strong> {invoice.Concepto || '-'}</div>
+                              <div><strong>Documento:</strong> {invoice.Documento_doc || '-'}</div>
+                              <div><strong>Concepto:</strong> {invoice.Concepto_doc || '-'}</div>
                             </div>
                           </div>
                         )}
@@ -1055,9 +1055,9 @@ function MatchesList({ matches, justifications, setJustifications }) {
                                       borderTop: '1px solid rgba(255,255,255,0.1)'
                                     }}>
                                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem' }}>
-                                        <div><strong>Cuenta:</strong> {payment.Cuenta}</div>
-                                        <div><strong>Documento:</strong> {payment.Documento || '-'}</div>
-                                        <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto || '-'}</div>
+                                        <div><strong>Cuenta:</strong> {payment.Cuenta_pago || '-'}</div>
+                                        <div><strong>Documento:</strong> {payment.Documento_pago || '-'}</div>
+                                        <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto_pago || '-'}</div>
                                       </div>
                                     </div>
                                   )}
@@ -1185,9 +1185,9 @@ function MatchesList({ matches, justifications, setJustifications }) {
                                 borderTop: '1px solid rgba(255,255,255,0.1)'
                               }}>
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem' }}>
-                                  <div><strong>Cuenta:</strong> {payment.Cuenta}</div>
-                                  <div><strong>Documento:</strong> {payment.Documento || '-'}</div>
-                                  <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto || '-'}</div>
+                                  <div><strong>Cuenta:</strong> {payment.Cuenta_pago || '-'}</div>
+                                  <div><strong>Documento:</strong> {payment.Documento_pago || '-'}</div>
+                                  <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto_pago || '-'}</div>
                                 </div>
                               </div>
                             )}

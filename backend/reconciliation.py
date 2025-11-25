@@ -406,7 +406,15 @@ class Reconciler:
                 "Hoja_doc": inv["original_row"]["hoja"],
                 "Hoja_pago": payment_row["hoja"],
                 "MatchMethod": method,
-                "Confidence": round(confidence, 1)
+                "Confidence": round(confidence, 1),
+                # Invoice original fields
+                "Cuenta_doc": inv["original_row"]["cuenta"],
+                "Documento_doc": inv["original_row"]["doc"],
+                "Concepto_doc": inv["original_row"]["concepto"],
+                # Payment original fields
+                "Cuenta_pago": payment_row["cuenta"],
+                "Documento_pago": payment_row["doc"],
+                "Concepto_pago": payment_row["concepto"]
             })
 
         # Cleanup fully paid invoices
@@ -426,7 +434,15 @@ class Reconciler:
                 "Hoja_doc": None,
                 "Hoja_pago": payment_row["hoja"],
                 "MatchMethod": "Unallocated",
-                "Confidence": 0  # 0% confidence for unallocated
+                "Confidence": 0,  # 0% confidence for unallocated
+                # Invoice fields - empty for unallocated payments
+                "Cuenta_doc": None,
+                "Documento_doc": None,
+                "Concepto_doc": None,
+                # Payment original fields
+                "Cuenta_pago": payment_row["cuenta"],
+                "Documento_pago": payment_row["doc"],
+                "Concepto_pago": payment_row["concepto"]
             })
             
         # Check if set is closed (no open invoices and no running payment)
@@ -454,7 +470,15 @@ class Reconciler:
                 "Hoja_doc": inv["original_row"]["hoja"],
                 "Hoja_pago": None,
                 "MatchMethod": "Open",
-                "Confidence": 0  # 0% confidence for open invoices
+                "Confidence": 0,  # 0% confidence for open invoices
+                # Invoice original fields
+                "Cuenta_doc": inv["original_row"]["cuenta"],
+                "Documento_doc": inv["original_row"]["doc"],
+                "Concepto_doc": inv["original_row"]["concepto"],
+                # Payment fields - empty for open invoices
+                "Cuenta_pago": None,
+                "Documento_pago": None,
+                "Concepto_pago": None
             })
 
 def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
