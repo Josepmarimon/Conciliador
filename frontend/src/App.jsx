@@ -133,6 +133,11 @@ function App() {
               <h1 style={{ fontSize: '22px', fontWeight: '700', letterSpacing: '-0.03em', margin: 0 }}>Conciliador</h1>
               <p style={{ fontSize: '13px', color: 'var(--color-label-secondary)', margin: 0 }}>
                 {result?.company_name || 'Assessoria Egara'}
+                {result?.period && (
+                  <span style={{ marginLeft: '0.5rem', color: 'var(--color-accent-blue)', fontWeight: '600' }}>
+                    • {result.period}
+                  </span>
+                )}
               </p>
             </div>
           </div>

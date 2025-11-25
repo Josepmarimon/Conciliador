@@ -188,6 +188,57 @@ def extract_company_name(df_head: pd.DataFrame, header_row: int) -> Optional[str
     return None
 
 
+def extract_period(df_head: pd.DataFrame, header_row: int) -> Optional[str]:
+    """Extract period information from the rows before the header"""
+    if header_row == 0:
+        return None
+
+    # Look at rows before the header
+    for idx in range(min(header_row, 10)):
+        row = df_head.iloc[idx]
+        # Get non-empty cells
+        non_empty = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip()]
+
+        # Look for patterns like "Período: de 01/01/2025 a 31/12/2025"
+        for val in non_empty:
+            # Check for explicit period patterns
+            period_match = re.search(r'(?:Período|Periodo|Period):\s*(.+)', val, flags=re.IGNORECASE)
+            if period_match:
+                period_text = period_match.group(1).strip()
+                if period_text and len(period_text) > 5:
+                    # Try to extract a cleaner format like "1T 2025" or "Q1 2025"
+                    # First check if it's already in short format
+                    if re.search(r'\d[TQ]\s*\d{4}', period_text, flags=re.IGNORECASE):
+                        return period_text
+
+                    # Try to extract from date range format: "de DD/MM/YYYY a DD/MM/YYYY"
+                    date_range_match = re.search(r'de\s+(\d{1,2})/(\d{1,2})/(\d{4})\s+a\s+(\d{1,2})/(\d{1,2})/(\d{4})', period_text, flags=re.IGNORECASE)
+                    if date_range_match:
+                        start_month = int(date_range_match.group(2))
+                        end_month = int(date_range_match.group(5))
+                        year = date_range_match.group(6)
+
+                        # Determine quarter based on months
+                        if start_month == 1 and end_month in [3, 12]:
+                            quarter = "1T" if end_month == 3 else "Anual"
+                        elif start_month == 4 and end_month == 6:
+                            quarter = "2T"
+                        elif start_month == 7 and end_month == 9:
+                            quarter = "3T"
+                        elif start_month == 10 and end_month == 12:
+                            quarter = "4T"
+                        else:
+                            # Return the full date range if we can't determine quarter
+                            return period_text
+
+                        return f"{quarter} {year}" if quarter != "Anual" else f"Anual {year}"
+
+                    # Return as is if no pattern matched
+                    return period_text
+
+    return None
+
+
 class Reconciler:
     def __init__(self, tol: float = 0.01):
         self.tol = tol
@@ -455,26 +506,30 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
     
     return pend[["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"]]
 
-def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict], Optional[str]]:
+def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict], Optional[str], Optional[str]]:
     xls = pd.ExcelFile(io.BytesIO(file_content))
-    
+
     ar_rows = []
     ap_rows = []
     meta_rows = []
     company_name = None
-    
+    period = None
+
     sheets_to_process = [sheet_filter] if sheet_filter else xls.sheet_names
 
     for idx, sheet_name in enumerate(sheets_to_process):
         if sheet_name not in xls.sheet_names:
             continue
-            
+
         df_head = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
         header_row = find_header_row(df_head)
-        
-        # Extract company name from first sheet only
-        if idx == 0 and company_name is None:
-            company_name = extract_company_name(df_head, header_row)
+
+        # Extract company name and period from first sheet only
+        if idx == 0:
+            if company_name is None:
+                company_name = extract_company_name(df_head, header_row)
+            if period is None:
+                period = extract_period(df_head, header_row)
         
         df0 = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
         
@@ -621,10 +676,10 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         for r in meta_rows
     ])
     
-    return out_sheets, summary_list, company_name
+    return out_sheets, summary_list, company_name, period
 
 def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, justifications: Optional[Dict[str, str]] = None) -> Tuple[Dict, io.BytesIO]:
-    out_sheets, summary_list, company_name = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
+    out_sheets, summary_list, company_name, period = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
 
     # Add justifications to detail sheets if provided
     if justifications:
@@ -687,9 +742,10 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
     # Construct raw response
     raw_response = {
         "summary": summary_list,
-        "meta": [], 
+        "meta": [],
         "details": details,
-        "company_name": company_name
+        "company_name": company_name,
+        "period": period
     }
     
     # Sanitize everything
