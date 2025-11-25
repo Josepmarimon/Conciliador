@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle } from 'lucide-react';
 import { conciliateFile } from './api';
+import HelpModal from './HelpModal';
 
 function App() {
   const [file, setFile] = useState(null);
@@ -14,6 +15,12 @@ function App() {
   const [apPrefix, setApPrefix] = useState("40");
   const [showSettings, setShowSettings] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
+
+  // Justifications for unmatched payments
+  const [justifications, setJustifications] = useState({});
+
+  // Help modal
+  const [showHelp, setShowHelp] = useState(false);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -300,6 +307,26 @@ function App() {
               </button>
             </div>
           )}
+
+          {/* Help Button - Always visible */}
+          <div style={{ marginTop: 'auto', paddingTop: 'var(--spacing-4)' }}>
+            <button
+              className="btn btn-secondary"
+              onClick={() => setShowHelp(true)}
+              style={{
+                width: '100%',
+                padding: 'var(--spacing-3)',
+                fontSize: '14px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              <HelpCircle size={16} />
+              Cómo Funciona
+            </button>
+          </div>
         </aside>
 
         {/* Main Content Area - Apple Style */}
@@ -339,18 +366,21 @@ function App() {
 
               {/* Visual Reconciliation Details */}
               {result.details && (
-                <ReconciliationDetails details={result.details} />
+                <ReconciliationDetails details={result.details} justifications={justifications} setJustifications={setJustifications} />
               )}
             </div>
           )}
 
         </div>
       </main >
+
+      {/* Help Modal */}
+      <HelpModal isOpen={showHelp} onClose={() => setShowHelp(false)} />
     </div >
   );
 }
 
-function ReconciliationDetails({ details }) {
+function ReconciliationDetails({ details, justifications, setJustifications }) {
   const [activeTab, setActiveTab] = useState('matches'); // 'matches' | 'pending'
   const [activeBlock, setActiveBlock] = useState('AR'); // 'AR' | 'AP'
 
@@ -375,91 +405,133 @@ function ReconciliationDetails({ details }) {
 
   return (
     <div style={{ marginTop: '3rem' }}>
-      {/* Controls */}
-      <div style={{ display: 'flex', justifyContent: 'center', gap: '1.5rem', marginBottom: '2rem' }}>
-        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: '12px', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-          <button
-            onClick={() => setActiveBlock('AR')}
-            style={{
-              padding: '12px 32px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeBlock === 'AR' ? 'linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-purple) 100%)' : 'rgba(255,255,255,0.05)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: '700',
-              fontSize: '15px',
-              transition: 'all 0.2s ease',
-              boxShadow: activeBlock === 'AR' ? '0 4px 12px rgba(10, 132, 255, 0.4)' : 'none',
-              transform: activeBlock === 'AR' ? 'scale(1.02)' : 'scale(1)'
-            }}
-          >
-            Clientes (AR)
-          </button>
-          <button
-            onClick={() => setActiveBlock('AP')}
-            style={{
-              padding: '12px 32px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeBlock === 'AP' ? 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' : 'rgba(255,255,255,0.05)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: '700',
-              fontSize: '15px',
-              transition: 'all 0.2s ease',
-              boxShadow: activeBlock === 'AP' ? '0 4px 12px rgba(236, 72, 153, 0.4)' : 'none',
-              transform: activeBlock === 'AP' ? 'scale(1.02)' : 'scale(1)'
-            }}
-          >
-            Proveedores (AP)
-          </button>
+      {/* Controls - Separated Groups with Different Styles */}
+      <div style={{
+        display: 'flex',
+        gap: '3rem',
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginBottom: '2rem'
+      }}>
+        {/* AR/AP Group - Tab Style */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <label style={{
+            fontSize: '11px',
+            fontWeight: '600',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'var(--color-label-secondary)',
+            textAlign: 'center'
+          }}>
+            Tipo de Cuenta
+          </label>
+          <div style={{
+            display: 'flex',
+            background: 'rgba(255,255,255,0.05)',
+            borderRadius: '10px',
+            padding: '4px',
+            border: '1px solid rgba(255,255,255,0.1)'
+          }}>
+            <button
+              onClick={() => setActiveBlock('AR')}
+              style={{
+                padding: '10px 28px',
+                borderRadius: '8px',
+                border: activeBlock === 'AR' ? '2px solid rgba(10, 132, 255, 0.6)' : '2px solid transparent',
+                background: activeBlock === 'AR' ? 'linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-purple) 100%)' : 'transparent',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: activeBlock === 'AR' ? '700' : '600',
+                fontSize: '14px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: activeBlock === 'AR' ? '0 4px 16px rgba(10, 132, 255, 0.4)' : 'none',
+                opacity: activeBlock === 'AR' ? 1 : 0.7
+              }}
+            >
+              Clientes
+            </button>
+            <button
+              onClick={() => setActiveBlock('AP')}
+              style={{
+                padding: '10px 28px',
+                borderRadius: '8px',
+                border: activeBlock === 'AP' ? '2px solid rgba(236, 72, 153, 0.6)' : '2px solid transparent',
+                background: activeBlock === 'AP' ? 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' : 'transparent',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: activeBlock === 'AP' ? '700' : '600',
+                fontSize: '14px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: activeBlock === 'AP' ? '0 4px 16px rgba(236, 72, 153, 0.4)' : 'none',
+                opacity: activeBlock === 'AP' ? 1 : 0.7
+              }}
+            >
+              Proveedores
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', background: 'rgba(0,0,0,0.4)', borderRadius: '12px', padding: '6px', border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 4px 12px rgba(0,0,0,0.3)' }}>
-          <button
-            onClick={() => setActiveTab('matches')}
-            style={{
-              padding: '12px 32px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeTab === 'matches' ? 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' : 'rgba(255,255,255,0.05)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: '700',
-              fontSize: '15px',
-              transition: 'all 0.2s ease',
-              boxShadow: activeTab === 'matches' ? '0 4px 12px rgba(16, 185, 129, 0.4)' : 'none',
-              transform: activeTab === 'matches' ? 'scale(1.02)' : 'scale(1)'
-            }}
-          >
-            Emparejados
-          </button>
-          <button
-            onClick={() => setActiveTab('pending')}
-            style={{
-              padding: '12px 32px',
-              borderRadius: '8px',
-              border: 'none',
-              background: activeTab === 'pending' ? 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)' : 'rgba(255,255,255,0.05)',
-              color: 'white',
-              cursor: 'pointer',
-              fontWeight: '700',
-              fontSize: '15px',
-              transition: 'all 0.2s ease',
-              boxShadow: activeTab === 'pending' ? '0 4px 12px rgba(245, 158, 11, 0.4)' : 'none',
-              transform: activeTab === 'pending' ? 'scale(1.02)' : 'scale(1)'
-            }}
-          >
-            Pendientes
-          </button>
+        {/* Matches/Pending Group - Pill/Badge Style */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          <label style={{
+            fontSize: '11px',
+            fontWeight: '600',
+            textTransform: 'uppercase',
+            letterSpacing: '0.1em',
+            color: 'var(--color-label-secondary)',
+            textAlign: 'center'
+          }}>
+            Estado
+          </label>
+          <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <button
+              onClick={() => setActiveTab('matches')}
+              style={{
+                padding: '10px 24px',
+                borderRadius: '20px',
+                border: activeTab === 'matches' ? '2px solid #10b981' : '2px solid rgba(255,255,255,0.15)',
+                background: activeTab === 'matches' ? 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' : 'rgba(0,0,0,0.3)',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '13px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: activeTab === 'matches' ? '0 4px 16px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                opacity: activeTab === 'matches' ? 1 : 0.6
+              }}
+            >
+              ✓ Emparejados
+            </button>
+            <button
+              onClick={() => setActiveTab('pending')}
+              style={{
+                padding: '10px 24px',
+                borderRadius: '20px',
+                border: activeTab === 'pending' ? '2px solid #f59e0b' : '2px solid rgba(255,255,255,0.15)',
+                background: activeTab === 'pending' ? 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)' : 'rgba(0,0,0,0.3)',
+                color: 'white',
+                cursor: 'pointer',
+                fontWeight: '700',
+                fontSize: '13px',
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+                boxShadow: activeTab === 'pending' ? '0 4px 16px rgba(245, 158, 11, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                opacity: activeTab === 'pending' ? 1 : 0.6
+              }}
+            >
+              ⧗ Pendientes
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Content */}
       <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '1rem', padding: '1.5rem', maxHeight: '600px', overflowY: 'auto' }}>
         {activeTab === 'matches' ? (
-          <MatchesList matches={getMatches()} />
+          <MatchesList matches={getMatches()} justifications={justifications} setJustifications={setJustifications} />
         ) : (
           <PendingList items={getPending()} />
         )}
@@ -468,7 +540,32 @@ function ReconciliationDetails({ details }) {
   );
 }
 
-function MatchesList({ matches }) {
+function MatchesList({ matches, justifications, setJustifications }) {
+  const [collapsedCards, setCollapsedCards] = useState(() => {
+    // Initialize all cards as collapsed (true)
+    const initial = {};
+    matches.forEach((set, i) => {
+      initial[i] = true;
+    });
+    return initial;
+  });
+
+  const toggleCard = (index) => {
+    setCollapsedCards(prev => ({
+      ...prev,
+      [index]: !prev[index]
+    }));
+  };
+
+  const justificationOptions = [
+    { value: '', label: 'Sin justificar' },
+    { value: 'prev_quarter', label: 'Factura trimestre anterior' },
+    { value: 'next_quarter', label: 'Factura trimestre posterior' },
+    { value: 'advance_payment', label: 'Pago anticipado' },
+    { value: 'credit_note', label: 'Nota de crédito' },
+    { value: 'other', label: 'Otro (revisar)' }
+  ];
+
   if (matches.length === 0) return <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No se encontraron emparejamientos.</div>;
 
   return (
@@ -486,12 +583,24 @@ function MatchesList({ matches }) {
         const numPayments = new Set(set.filter(r => r.PagoKey).map(r => r.PagoKey)).size;
 
         // Determine overall status - VERY CLEAR LOGIC
+        // Check if any unmatched payment in this set has been justified
+        const hasJustification = set.some(r => {
+          const rowKey = `${r.SetID}-${r.PagoKey}`;
+          return justifications[rowKey] && justifications[rowKey] !== '' && justifications[rowKey] !== 'other';
+        });
+
         let statusColor, statusBg, statusText, statusIcon;
-        if (hasUnmatched) {
+        if (hasUnmatched && hasJustification) {
+          // GREEN: Justified payment
+          statusColor = '#10B981';
+          statusBg = 'rgba(16, 185, 129, 0.15)';
+          statusText = 'Justificado';
+          statusIcon = '🟢';
+        } else if (hasUnmatched) {
           // RED: Payment without invoice
           statusColor = '#EF4444';
           statusBg = 'rgba(239, 68, 68, 0.15)';
-          statusText = 'Pago sin Factura';
+          statusText = 'Sin Factura';
           statusIcon = '🔴';
         } else if (hasPartial || totalPending > 0.01) {
           // ORANGE: Partial payment
@@ -515,253 +624,383 @@ function MatchesList({ matches }) {
             border: `3px solid ${statusColor}`,
             boxShadow: `0 0 20px ${statusColor}40`
           }}>
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', paddingBottom: '1rem', borderBottom: `2px solid ${statusColor}60` }}>
+            {/* Header - Clickable */}
+            <div
+              onClick={() => toggleCard(i)}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: collapsedCards[i] ? '0' : '1.25rem',
+                paddingBottom: collapsedCards[i] ? '0' : '1rem',
+                borderBottom: collapsedCards[i] ? 'none' : `2px solid ${statusColor}60`,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+                userSelect: 'none'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+            >
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                {/* Expand/Collapse Indicator */}
                 <div style={{
-                  background: statusBg,
                   color: statusColor,
-                  padding: '8px 16px',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: '800',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  border: `2px solid ${statusColor}`,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px'
+                  fontSize: '1.2rem',
+                  fontWeight: '700',
+                  transition: 'transform 0.2s ease',
+                  transform: collapsedCards[i] ? 'rotate(0deg)' : 'rotate(90deg)'
                 }}>
-                  <span style={{ fontSize: '18px' }}>{statusIcon}</span>
-                  {statusText}
+                  ▶
                 </div>
+                {/* Company Name */}
                 <span style={{ fontWeight: 'bold', color: '#e2e8f0', fontSize: '1.1rem' }}>{tercero}</span>
               </div>
               <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                  <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>📄 {numInvoices}</span> ↔ <span style={{ color: '#EC4899', fontWeight: 'bold' }}>💳 {numPayments}</span>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', display: 'flex', gap: '0.5rem' }}>
+                  <span style={{
+                    color: '#3B82F6',
+                    fontWeight: '700',
+                    background: 'rgba(59, 130, 246, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '4px'
+                  }}>{numInvoices} Fact.</span>
+                  <span style={{
+                    color: '#EC4899',
+                    fontWeight: '700',
+                    background: 'rgba(236, 72, 153, 0.15)',
+                    padding: '2px 8px',
+                    borderRadius: '4px'
+                  }}>{numPayments} Pag.</span>
                 </div>
               </div>
             </div>
 
-            {/* Table */}
-            <table style={{ width: '100%', fontSize: '0.9rem', borderCollapse: 'separate', borderSpacing: '0 0.5rem' }}>
-              <thead>
-                <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                  <th style={{ padding: '0.75rem' }}>Tipo</th>
-                  <th style={{ padding: '0.75rem' }}>Fecha</th>
-                  <th style={{ padding: '0.75rem' }}>Documento</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'right' }}>Importe Asignado</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'right' }}>Saldo Pendiente</th>
-                  <th style={{ padding: '0.75rem', textAlign: 'center' }}>Estado</th>
-                </tr>
-              </thead>
-              <tbody>
-                {set.map((row, j) => {
-                  const isInvoice = row.DocKey && !row.PagoKey;
-                  const isPayment = row.PagoKey && !row.DocKey;
-                  const isMatch = row.DocKey && row.PagoKey;
-                  const isUnmatched = row.Asignado < 0;
-                  const hasPending = row.ResidualFacturaTras > 0.01;
+            {/* Table - Conditionally rendered */}
+            {!collapsedCards[i] && (
+              <>
+                <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'separate', borderSpacing: '0 0.3rem' }}>
+                  <thead>
+                    <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
+                      <th style={{ padding: '0.4rem 0.5rem' }}>Tipo</th>
+                      <th style={{ padding: '0.4rem 0.5rem' }}>Fecha</th>
+                      <th style={{ padding: '0.4rem 0.5rem' }}>Documento</th>
+                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>Importe Asignado</th>
+                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>Saldo Pendiente</th>
+                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>Estado</th>
+                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>Justificación</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {set.map((row, j) => {
+                      const isInvoice = row.DocKey && !row.PagoKey;
+                      const isPayment = row.PagoKey && !row.DocKey;
+                      const isMatch = row.DocKey && row.PagoKey;
+                      const isUnmatched = row.Asignado < 0;
+                      const hasPending = row.ResidualFacturaTras > 0.01;
 
-                  // Row-level color coding
-                  let rowBg, rowBorder, rowStatusColor;
-                  if (isUnmatched) {
-                    // RED: Unmatched payment
-                    rowBg = 'rgba(239, 68, 68, 0.1)';
-                    rowBorder = '4px solid #EF4444';
-                    rowStatusColor = '#EF4444';
-                  } else if (hasPending) {
-                    // ORANGE: Partial
-                    rowBg = 'rgba(245, 158, 11, 0.1)';
-                    rowBorder = '4px solid #F59E0B';
-                    rowStatusColor = '#F59E0B';
-                  } else {
-                    // GREEN: OK
-                    rowBg = 'rgba(16, 185, 129, 0.1)';
-                    rowBorder = '4px solid #10B981';
-                    rowStatusColor = '#10B981';
-                  }
+                      // Check justification for this row
+                      const rowKey = `${row.SetID}-${row.PagoKey}`;
+                      const rowJustification = justifications[rowKey] || '';
+                      const isJustified = rowJustification && rowJustification !== '' && rowJustification !== 'other';
 
-                  return (
-                    <tr key={j} style={{
-                      background: rowBg,
-                      borderLeft: rowBorder,
-                      borderRadius: '8px'
-                    }}>
-                      <td style={{ padding: '0.75rem', borderRadius: '8px 0 0 8px' }}>
-                        {isMatch && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <span style={{ color: '#10B981', fontWeight: 'bold', fontSize: '0.9rem' }}>⟷ Match</span>
-                            {row.MatchMethod && (
+                      // Row-level color coding
+                      let rowBg, rowBorder, rowStatusColor;
+                      if (isUnmatched && isJustified) {
+                        // GREEN: Justified unmatched payment
+                        rowBg = 'rgba(16, 185, 129, 0.1)';
+                        rowBorder = '4px solid #10B981';
+                        rowStatusColor = '#10B981';
+                      } else if (isUnmatched) {
+                        // RED: Unmatched payment
+                        rowBg = 'rgba(239, 68, 68, 0.1)';
+                        rowBorder = '4px solid #EF4444';
+                        rowStatusColor = '#EF4444';
+                      } else if (hasPending) {
+                        // ORANGE: Partial
+                        rowBg = 'rgba(245, 158, 11, 0.1)';
+                        rowBorder = '4px solid #F59E0B';
+                        rowStatusColor = '#F59E0B';
+                      } else {
+                        // GREEN: OK
+                        rowBg = 'rgba(16, 185, 129, 0.1)';
+                        rowBorder = '4px solid #10B981';
+                        rowStatusColor = '#10B981';
+                      }
+
+                      return (
+                        <tr key={j} style={{
+                          background: rowBg,
+                          borderLeft: rowBorder,
+                          borderRadius: '8px'
+                        }}>
+                          <td style={{ padding: '0.4rem 0.5rem', borderRadius: '8px 0 0 8px' }}>
+                            {isMatch && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                <div style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: '800',
+                                  color: '#10B981',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.03em'
+                                }}>Match</div>
+                                {row.MatchMethod && (
+                                  <span style={{
+                                    fontSize: '0.6rem',
+                                    fontWeight: '700',
+                                    padding: '2px 6px',
+                                    borderRadius: '3px',
+                                    background:
+                                      row.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
+                                        row.MatchMethod === 'Exact' ? 'rgba(16, 185, 129, 0.2)' :
+                                          row.MatchMethod === 'FIFO' ? 'rgba(168, 85, 247, 0.2)' :
+                                            'rgba(120, 120, 128, 0.2)',
+                                    color:
+                                      row.MatchMethod === 'Reference' ? '#10B981' :
+                                        row.MatchMethod === 'Exact' ? '#10B981' :
+                                          row.MatchMethod === 'FIFO' ? '#A855F7' :
+                                            '#6B7280',
+                                    border: `1px solid ${row.MatchMethod === 'Reference' ? '#10B981' :
+                                      row.MatchMethod === 'Exact' ? '#3B82F6' :
+                                        row.MatchMethod === 'FIFO' ? '#A855F7' :
+                                          '#6B7280'
+                                      }`,
+                                    display: 'inline-block'
+                                  }}>
+                                    {row.MatchMethod.toUpperCase()}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                            {isInvoice && (
                               <span style={{
-                                fontSize: '0.7rem',
+                                color: '#3B82F6',
                                 fontWeight: '700',
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                background:
-                                  row.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
-                                    row.MatchMethod === 'Exact' ? 'rgba(59, 130, 246, 0.2)' :
-                                      row.MatchMethod === 'FIFO' ? 'rgba(168, 85, 247, 0.2)' :
-                                        'rgba(120, 120, 128, 0.2)',
-                                color:
-                                  row.MatchMethod === 'Reference' ? '#10B981' :
-                                    row.MatchMethod === 'Exact' ? '#3B82F6' :
-                                      row.MatchMethod === 'FIFO' ? '#A855F7' :
-                                        '#6B7280'
-                              }}>
-                                {row.MatchMethod === 'Reference' && '🔗 Ref'}
-                                {row.MatchMethod === 'Exact' && '💯 Exact'}
-                                {row.MatchMethod === 'FIFO' && '⏰ FIFO'}
-                                {!['Reference', 'Exact', 'FIFO'].includes(row.MatchMethod) && row.MatchMethod}
+                                fontSize: '0.65rem',
+                                background: 'rgba(59, 130, 246, 0.15)',
+                                padding: '3px 8px',
+                                borderRadius: '3px',
+                                border: '1px solid #3B82F6',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>Factura</span>
+                            )}
+                            {isPayment && (
+                              <span style={{
+                                color: '#EF4444',
+                                fontWeight: '700',
+                                fontSize: '0.65rem',
+                                background: 'rgba(239, 68, 68, 0.15)',
+                                padding: '3px 8px',
+                                borderRadius: '3px',
+                                border: '1px solid #EF4444',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>Pago</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
+                            {isMatch ? (
+                              <div style={{ fontSize: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                <div style={{ fontWeight: '600', color: '#3B82F6' }}>{row.Fecha_doc}</div>
+                                <div style={{ color: '#EC4899', fontWeight: '600' }}>{row.Fecha_pago}</div>
+                              </div>
+                            ) : (
+                              row.Fecha_doc || row.Fecha_pago || '-'
+                            )}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {isMatch ? (
+                              <div style={{ fontSize: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                <div title={row.DocKey} style={{ fontWeight: '600', color: '#3B82F6' }}>{row.DocKey ? row.DocKey.split('|')[1] : '-'}</div>
+                                <div style={{ color: '#EC4899', fontWeight: '600' }} title={row.PagoKey}>{row.PagoKey ? row.PagoKey.split('|')[1] : '-'}</div>
+                              </div>
+                            ) : (
+                              <span title={row.DocKey || row.PagoKey} style={{ fontSize: '0.7rem' }}>
+                                {(row.DocKey || row.PagoKey) ? (row.DocKey || row.PagoKey).split('|')[1] : '-'}
                               </span>
                             )}
-                          </div>
-                        )}
-                        {isInvoice && <span style={{ color: '#3B82F6', fontWeight: 'bold' }}>📄 Factura</span>}
-                        {isPayment && <span style={{ color: '#EF4444', fontWeight: 'bold' }}>💳 Pago</span>}
-                      </td>
-                      <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                        {isMatch ? (
-                          <div style={{ fontSize: '0.8rem' }}>
-                            <div style={{ fontWeight: '600' }}>{row.Fecha_doc}</div>
-                            <div style={{ color: 'var(--text-muted)', opacity: 0.7 }}>↓ {row.Fecha_pago}</div>
-                          </div>
-                        ) : (
-                          row.Fecha_doc || row.Fecha_pago || '-'
-                        )}
-                      </td>
-                      <td style={{ padding: '0.75rem', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {isMatch ? (
-                          <div style={{ fontSize: '0.8rem' }}>
-                            <div title={row.DocKey} style={{ fontWeight: '600' }}>{row.DocKey ? row.DocKey.split('|')[1] : '-'}</div>
-                            <div style={{ color: 'var(--text-muted)', opacity: 0.7 }} title={row.PagoKey}>{row.PagoKey ? row.PagoKey.split('|')[1] : '-'}</div>
-                          </div>
-                        ) : (
-                          <span title={row.DocKey || row.PagoKey} style={{ fontSize: '0.85rem' }}>
-                            {(row.DocKey || row.PagoKey) ? (row.DocKey || row.PagoKey).split('|')[1] : '-'}
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                        <div style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          color: rowStatusColor,
-                          fontWeight: '700',
-                          background: `${rowStatusColor}20`,
-                          padding: '6px 12px',
-                          borderRadius: '6px',
-                          fontSize: '0.95rem',
-                          border: `2px solid ${rowStatusColor}`
-                        }}>
-                          {Math.abs(row.Asignado)?.toFixed(2)} €
-                        </div>
-                      </td>
-                      <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                        {row.ResidualFacturaTras !== null && row.ResidualFacturaTras !== undefined && !isPayment ? (
-                          <div style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                            color: row.ResidualFacturaTras > 0.01 ? '#EF4444' : '#10B981',
-                            fontWeight: '700',
-                            background: row.ResidualFacturaTras > 0.01 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                            padding: '6px 12px',
-                            borderRadius: '6px',
-                            fontSize: '0.95rem',
-                            border: row.ResidualFacturaTras > 0.01 ? '2px solid #EF4444' : '2px solid #10B981'
-                          }}>
-                            {row.ResidualFacturaTras > 0.01 ? <AlertCircle size={14} /> : <CheckCircle size={14} />}
-                            {row.ResidualFacturaTras?.toFixed(2)} €
-                          </div>
-                        ) : (
-                          <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
-                        )}
-                      </td>
-                      <td style={{ padding: '0.75rem', textAlign: 'center', borderRadius: '0 8px 8px 0' }}>
-                        {isUnmatched ? (
-                          <span style={{
-                            fontSize: '16px',
-                            fontWeight: '900',
-                            color: '#EF4444',
-                            background: 'rgba(239, 68, 68, 0.2)',
-                            padding: '4px 12px',
-                            borderRadius: '6px',
-                            border: '2px solid #EF4444'
-                          }}>
-                            🔴 KO
-                          </span>
-                        ) : row.ResidualFacturaTras > 0.01 ? (
-                          <span style={{
-                            fontSize: '16px',
-                            fontWeight: '900',
-                            color: '#F59E0B',
-                            background: 'rgba(245, 158, 11, 0.2)',
-                            padding: '4px 12px',
-                            borderRadius: '6px',
-                            border: '2px solid #F59E0B'
-                          }}>
-                            🟠 PARCIAL
-                          </span>
-                        ) : (
-                          <span style={{
-                            fontSize: '16px',
-                            fontWeight: '900',
-                            color: '#10B981',
-                            background: 'rgba(16, 185, 129, 0.2)',
-                            padding: '4px 12px',
-                            borderRadius: '6px',
-                            border: '2px solid #10B981'
-                          }}>
-                            🟢 OK
-                          </span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>
+                            <div style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              color: rowStatusColor,
+                              fontWeight: '700',
+                              background: `${rowStatusColor}20`,
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              fontSize: '0.75rem',
+                              border: `2px solid ${rowStatusColor}`
+                            }}>
+                              {Math.abs(row.Asignado)?.toFixed(2)} €
+                            </div>
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>
+                            {row.ResidualFacturaTras !== null && row.ResidualFacturaTras !== undefined && !isPayment ? (
+                              <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                color: row.ResidualFacturaTras > 0.01 ? '#EF4444' : '#10B981',
+                                fontWeight: '700',
+                                background: row.ResidualFacturaTras > 0.01 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                fontSize: '0.75rem',
+                                border: row.ResidualFacturaTras > 0.01 ? '2px solid #EF4444' : '2px solid #10B981'
+                              }}>
+                                {row.ResidualFacturaTras > 0.01 ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
+                                {row.ResidualFacturaTras?.toFixed(2)} €
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>-</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
+                            {isUnmatched && isJustified ? (
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: '700',
+                                color: '#10B981',
+                                background: 'rgba(16, 185, 129, 0.2)',
+                                padding: '4px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid #10B981',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>
+                                Justificado
+                              </span>
+                            ) : isUnmatched ? (
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: '700',
+                                color: '#EF4444',
+                                background: 'rgba(239, 68, 68, 0.2)',
+                                padding: '4px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid #EF4444',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>
+                                Sin Factura
+                              </span>
+                            ) : row.ResidualFacturaTras > 0.01 ? (
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: '700',
+                                color: '#F59E0B',
+                                background: 'rgba(245, 158, 11, 0.2)',
+                                padding: '4px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid #F59E0B',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>
+                                Parcial
+                              </span>
+                            ) : (
+                              <span style={{
+                                fontSize: '0.65rem',
+                                fontWeight: '700',
+                                color: '#10B981',
+                                background: 'rgba(16, 185, 129, 0.2)',
+                                padding: '4px 10px',
+                                borderRadius: '4px',
+                                border: '1px solid #10B981',
+                                textTransform: 'uppercase',
+                                letterSpacing: '0.03em'
+                              }}>
+                                Pagado
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.4rem 0.5rem' }}>
+                            {isUnmatched ? (
+                              <select
+                                value={rowJustification}
+                                onChange={(e) => {
+                                  const newJustifications = { ...justifications };
+                                  if (e.target.value === '') {
+                                    delete newJustifications[rowKey];
+                                  } else {
+                                    newJustifications[rowKey] = e.target.value;
+                                  }
+                                  setJustifications(newJustifications);
+                                }}
+                                style={{
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  border: `1px solid ${isJustified ? '#10B981' : '#EF4444'}`,
+                                  background: 'rgba(0,0,0,0.3)',
+                                  color: 'white',
+                                  fontSize: '0.7rem',
+                                  fontWeight: '600',
+                                  cursor: 'pointer',
+                                  width: '100%',
+                                  maxWidth: '180px',
+                                  outline: 'none',
+                                  transition: 'all 0.2s ease'
+                                }}
+                                onMouseEnter={(e) => e.target.style.borderColor = '#10B981'}
+                                onMouseLeave={(e) => e.target.style.borderColor = isJustified ? '#10B981' : '#EF4444'}
+                              >
+                                {justificationOptions.map(opt => (
+                                  <option key={opt.value} value={opt.value} style={{ background: '#1e293b', color: 'white' }}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
 
-            {/* Summary Footer */}
-            <div style={{
-              marginTop: '1rem',
-              padding: '1rem',
-              background: 'rgba(0,0,0,0.4)',
-              borderRadius: '8px',
-              border: `2px solid ${statusColor}`,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <div style={{ display: 'flex', gap: '2rem' }}>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pagado</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#10B981' }}>
-                    {totalPaid.toFixed(2)} €
+                {/* Summary Footer */}
+                <div style={{
+                  marginTop: '1rem',
+                  padding: '1rem',
+                  background: 'rgba(0,0,0,0.4)',
+                  borderRadius: '8px',
+                  border: `2px solid ${statusColor}`,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center'
+                }}>
+                  <div style={{ display: 'flex', gap: '2rem' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pagado</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '800', color: '#10B981' }}>
+                        {totalPaid.toFixed(2)} €
+                      </div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pendiente</div>
+                      <div style={{ fontSize: '1.25rem', fontWeight: '800', color: totalPending > 0.01 ? '#EF4444' : '#10B981' }}>
+                        {totalPending.toFixed(2)} €
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{
+                    fontSize: '1.5rem',
+                    fontWeight: '900',
+                    color: statusColor,
+                    background: statusBg,
+                    padding: '12px 24px',
+                    borderRadius: '8px',
+                    border: `3px solid ${statusColor}`
+                  }}>
+                    {statusIcon} {statusText}
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '4px' }}>Total Pendiente</div>
-                  <div style={{ fontSize: '1.25rem', fontWeight: '800', color: totalPending > 0.01 ? '#EF4444' : '#10B981' }}>
-                    {totalPending.toFixed(2)} €
-                  </div>
-                </div>
-              </div>
-              <div style={{
-                fontSize: '1.5rem',
-                fontWeight: '900',
-                color: statusColor,
-                background: statusBg,
-                padding: '12px 24px',
-                borderRadius: '8px',
-                border: `3px solid ${statusColor}`
-              }}>
-                {statusIcon} {statusText}
-              </div>
-            </div>
+              </>
+            )}
           </div>
         );
       })}
