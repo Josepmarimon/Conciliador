@@ -3,6 +3,7 @@ import numpy as np
 import re
 import io
 from typing import List, Dict, Tuple, Optional, Any
+from difflib import SequenceMatcher
 
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -77,6 +78,76 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
             }
     return schema
 
+def extract_invoice_references(text: str) -> List[str]:
+    """Extract potential invoice references from text using common patterns"""
+    if not text:
+        return []
+
+    text = str(text).upper()
+    references = []
+
+    # Common invoice patterns
+    patterns = [
+        r'A/(\d+)',                    # A/337748 (specific format from real data)
+        r'INV[-/\s]?(\d+)',           # INV-123, INV/123, INV 123
+        r'F[-/\s]?(\d+)',              # F-123, F/123, F 123
+        r'FAC[-/\s]?(\d+)',            # FAC-123, FACTURA 123
+        r'FRA\.?\s*(\d+)',             # FRA. 123, FRA 123 (from "PAGO FRA.")
+        r'FACTURA\s+(\d+)',            # FACTURA 2144642
+        r'(\d+)[-/]\d{4}',             # 123-2024, 123/2024
+        r'(\d{5,})',                   # Any 5+ digit number (like 2144642)
+        r'[A-Z]{1,3}[-/](\d+)',        # A/123, AB/123, ABC-123
+        r'#(\d+)',                     # #123
+    ]
+
+    for pattern in patterns:
+        matches = re.findall(pattern, text)
+        references.extend(matches)
+
+    # Also include the full text split by common separators for partial matching
+    # This helps when invoice ref doesn't follow standard patterns
+    text_parts = re.split(r'[\s,;/\-]+', text)
+    references.extend([p for p in text_parts if len(p) >= 2 and not p.isspace()])
+
+    # Remove duplicates while preserving order
+    seen = set()
+    unique_refs = []
+    for ref in references:
+        if ref and ref not in seen:
+            seen.add(ref)
+            unique_refs.append(ref)
+
+    return unique_refs
+
+def fuzzy_match_score(str1: str, str2: str, threshold: float = 0.8) -> float:
+    """Calculate fuzzy match score between two strings (0-1)"""
+    if not str1 or not str2:
+        return 0.0
+
+    str1 = str(str1).upper().strip()
+    str2 = str(str2).upper().strip()
+
+    # Exact match
+    if str1 == str2:
+        return 1.0
+
+    # One string contains the other
+    if str1 in str2 or str2 in str1:
+        return 0.9
+
+    # Use SequenceMatcher for fuzzy matching
+    ratio = SequenceMatcher(None, str1, str2).ratio()
+
+    # Check if strings are similar after removing common prefixes
+    for prefix in ['INV', 'F', 'FAC', '#']:
+        s1_clean = str1.replace(prefix, '').strip('-/ ')
+        s2_clean = str2.replace(prefix, '').strip('-/ ')
+        if s1_clean and s2_clean:
+            clean_ratio = SequenceMatcher(None, s1_clean, s2_clean).ratio()
+            ratio = max(ratio, clean_ratio)
+
+    return ratio if ratio >= threshold else 0.0
+
 def extract_company_name(df_head: pd.DataFrame, header_row: int) -> Optional[str]:
     """Extract company name from the rows before the header"""
     if header_row == 0:
@@ -123,14 +194,20 @@ class Reconciler:
         self.open_invoices = []  # List of dicts
         self.out_rows = []
         self.set_id = 0
-        
+
     def add_invoice(self, row):
+        # Extract multiple possible references from document field
+        doc_refs = []
+        if row["doc"]:
+            doc_refs = extract_invoice_references(str(row["doc"]))
+
         self.open_invoices.append({
             "doc_key": row["doc_key"],
             "remaining": float(row["neto_norm"]),
             "fecha": row["fecha"],
             "row_id": row["row_id"],
             "doc_ref": str(row["doc"]).lower().strip() if row["doc"] else "",
+            "doc_refs": doc_refs,  # Multiple possible references
             "original_row": row
         })
 
@@ -138,56 +215,119 @@ class Reconciler:
         payment_amount = -float(payment_row["neto_norm"])
         payment_left = payment_amount
         payment_concept = str(payment_row["concepto"]).lower() if payment_row["concepto"] else ""
-        
-        matches = [] # List of (invoice_index, amount_to_take, method)
+        payment_date = payment_row["fecha"]
 
-        # --- Phase 1: Reference Match ---
-        # Look for invoice document numbers in payment concept
-        if payment_left > self.tol:
+        # Extract potential references from payment concept
+        payment_refs = extract_invoice_references(payment_concept) if payment_concept else []
+
+        matches = [] # List of (invoice_index, amount_to_take, method, confidence)
+
+        # --- Phase 1: Enhanced Reference Match with Fuzzy Logic ---
+        if payment_left > self.tol and (payment_concept or payment_row.get("doc")):
+            best_ref_matches = []
+
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
                     continue
-                
-                # Check if doc ref is present in payment concept (and is not empty/short)
-                # We require at least 3 chars to avoid matching "1", "A", etc.
+
+                max_score = 0.0
+
+                # Check exact substring match (legacy behavior for compatibility)
                 if len(inv["doc_ref"]) >= 3 and inv["doc_ref"] in payment_concept:
+                    max_score = 0.95
+
+                # Check against extracted references with fuzzy matching
+                for inv_ref in inv["doc_refs"]:
+                    for pay_ref in payment_refs:
+                        score = fuzzy_match_score(inv_ref, pay_ref, threshold=0.7)
+                        if score > max_score:
+                            max_score = score
+
+                if max_score > 0.7:  # Threshold for considering a reference match
+                    best_ref_matches.append((idx, max_score))
+
+            # Sort by score and process best matches first
+            best_ref_matches.sort(key=lambda x: x[1], reverse=True)
+
+            for idx, score in best_ref_matches:
+                if payment_left <= self.tol:
+                    break
+                inv = self.open_invoices[idx]
+                if inv["remaining"] > self.tol:
                     take = min(inv["remaining"], payment_left)
-                    matches.append((idx, take, "Reference"))
+                    # Confidence: 95-100% for perfect match, 80-95% for fuzzy match
+                    confidence = min(95 + (score * 5), 100) if score >= 0.9 else 80 + (score * 15)
+                    matches.append((idx, take, "Reference", confidence))
                     inv["remaining"] -= take
                     payment_left -= take
-                    if payment_left <= self.tol:
-                        break
 
         # --- Phase 2: Exact Amount Match ---
-        # Look for a single invoice with the exact remaining payment amount
         if payment_left > self.tol:
-            best_match_idx = -1
-            
-            # Find invoices with exact amount
             candidates = []
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
                     continue
                 if abs(inv["remaining"] - payment_left) <= self.tol:
                     candidates.append(idx)
-            
-            # If we found exactly one or more, pick the first one (oldest due to sort)
-            # Strategy: If multiple exact matches, FIFO among them is fine.
+
             if candidates:
+                # Prefer candidates closer in date
+                if payment_date and payment_date != pd.NaT:
+                    candidates.sort(key=lambda idx: abs((self.open_invoices[idx]["fecha"] - payment_date).days)
+                                    if self.open_invoices[idx]["fecha"] != pd.NaT else 999999)
+
                 best_match_idx = candidates[0]
-                take = payment_left # It's a full match
-                matches.append((best_match_idx, take, "Exact"))
+                take = payment_left
+                # Higher confidence if dates are close
+                days_diff = abs((self.open_invoices[best_match_idx]["fecha"] - payment_date).days) if payment_date != pd.NaT and self.open_invoices[best_match_idx]["fecha"] != pd.NaT else 999
+                confidence = 90 if days_diff <= 30 else 85 if days_diff <= 60 else 80
+                matches.append((best_match_idx, take, "Exact", confidence))
                 self.open_invoices[best_match_idx]["remaining"] -= take
                 payment_left -= take
 
-        # --- Phase 3: FIFO Fallback ---
+        # --- Phase 3: Date Proximity Match (NEW) ---
+        if payment_left > self.tol and payment_date and payment_date != pd.NaT:
+            proximity_candidates = []
+
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] <= self.tol:
+                    continue
+
+                inv_date = inv["fecha"]
+                if inv_date and inv_date != pd.NaT:
+                    days_diff = (payment_date - inv_date).days
+                    # Payment within 0-45 days after invoice
+                    if 0 <= days_diff <= 45:
+                        # Check if amount is reasonably close (within 20%)
+                        amount_ratio = payment_left / inv["remaining"] if inv["remaining"] > 0 else 0
+                        if 0.8 <= amount_ratio <= 1.2:
+                            proximity_candidates.append((idx, days_diff, amount_ratio))
+
+            if proximity_candidates:
+                # Sort by days difference (prefer closer dates)
+                proximity_candidates.sort(key=lambda x: x[1])
+                best_idx, days_diff, amount_ratio = proximity_candidates[0]
+
+                if self.open_invoices[best_idx]["remaining"] > self.tol:
+                    take = min(self.open_invoices[best_idx]["remaining"], payment_left)
+                    # Confidence based on date proximity and amount match
+                    date_confidence = 75 - (days_diff * 0.5)  # Max 75, decreases with days
+                    amount_confidence = 70 if 0.95 <= amount_ratio <= 1.05 else 65
+                    confidence = min(date_confidence, amount_confidence)
+                    matches.append((best_idx, take, "DateProximity", confidence))
+                    self.open_invoices[best_idx]["remaining"] -= take
+                    payment_left -= take
+
+        # --- Phase 4: FIFO Fallback ---
         if payment_left > self.tol:
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
                     continue
-                
+
                 take = min(inv["remaining"], payment_left)
-                matches.append((idx, take, "FIFO"))
+                # Low confidence for FIFO matches
+                confidence = 50
+                matches.append((idx, take, "FIFO", confidence))
                 inv["remaining"] -= take
                 payment_left -= take
                 if payment_left <= self.tol:
@@ -195,7 +335,13 @@ class Reconciler:
         
         # --- Record Results ---
         # We need to record matches. Note that one payment might match multiple invoices (mixed methods)
-        for idx, take, method in matches:
+        for match_tuple in matches:
+            if len(match_tuple) == 4:  # New format with confidence
+                idx, take, method, confidence = match_tuple
+            else:  # Legacy format without confidence (shouldn't happen but for safety)
+                idx, take, method = match_tuple
+                confidence = 50  # Default confidence
+
             inv = self.open_invoices[idx]
             self.out_rows.append({
                 "SetID": self.set_id,
@@ -208,7 +354,8 @@ class Reconciler:
                 "ResidualFacturaTras": inv["remaining"],
                 "Hoja_doc": inv["original_row"]["hoja"],
                 "Hoja_pago": payment_row["hoja"],
-                "MatchMethod": method
+                "MatchMethod": method,
+                "Confidence": round(confidence, 1)
             })
 
         # Cleanup fully paid invoices
@@ -227,7 +374,8 @@ class Reconciler:
                 "ResidualFacturaTras": np.nan,
                 "Hoja_doc": None,
                 "Hoja_pago": payment_row["hoja"],
-                "MatchMethod": "Unallocated"
+                "MatchMethod": "Unallocated",
+                "Confidence": 0  # 0% confidence for unallocated
             })
             
         # Check if set is closed (no open invoices and no running payment)
@@ -254,7 +402,8 @@ class Reconciler:
                 "ResidualFacturaTras": inv["remaining"],
                 "Hoja_doc": inv["original_row"]["hoja"],
                 "Hoja_pago": None,
-                "MatchMethod": "Open"
+                "MatchMethod": "Open",
+                "Confidence": 0  # 0% confidence for open invoices
             })
 
 def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
@@ -474,9 +623,21 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
     
     return out_sheets, summary_list, company_name
 
-def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str) -> Tuple[Dict, io.BytesIO]:
+def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, justifications: Optional[Dict[str, str]] = None) -> Tuple[Dict, io.BytesIO]:
     out_sheets, summary_list, company_name = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
-    
+
+    # Add justifications to detail sheets if provided
+    if justifications:
+        for sheet_name in ["AR_Detalle", "AP_Detalle"]:
+            if sheet_name in out_sheets and not out_sheets[sheet_name].empty:
+                df = out_sheets[sheet_name]
+                # Add justification column
+                df["Justificacion"] = df.apply(
+                    lambda row: justifications.get(f"{row['SetID']}-{row['PagoKey']}", "")
+                    if row["MatchMethod"] == "Unallocated" else "",
+                    axis=1
+                )
+
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for name, data in out_sheets.items():

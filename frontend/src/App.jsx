@@ -46,7 +46,7 @@ function App() {
     setError(null);
 
     try {
-      const data = await conciliateFile(file, tol, arPrefix, apPrefix);
+      const data = await conciliateFile(file, tol, arPrefix, apPrefix, justifications);
       setResult(data);
     } catch (err) {
       console.error(err);
@@ -65,7 +65,7 @@ function App() {
     setIsRecalculating(true);
 
     try {
-      const data = await conciliateFile(file, newTol, arPrefix, apPrefix);
+      const data = await conciliateFile(file, newTol, arPrefix, apPrefix, justifications);
       setResult(data);
     } catch (err) {
       console.error(err);
@@ -550,10 +550,22 @@ function MatchesList({ matches, justifications, setJustifications }) {
     return initial;
   });
 
+  const [expandedRows, setExpandedRows] = useState({});
+  const [filterMethod, setFilterMethod] = useState('all'); // all, Reference, Exact, DateProximity, FIFO, Unallocated
+  const [showOnlyUnjustified, setShowOnlyUnjustified] = useState(false);
+
   const toggleCard = (index) => {
     setCollapsedCards(prev => ({
       ...prev,
       [index]: !prev[index]
+    }));
+  };
+
+  const toggleRowDetails = (cardIndex, rowIndex) => {
+    const key = `${cardIndex}-${rowIndex}`;
+    setExpandedRows(prev => ({
+      ...prev,
+      [key]: !prev[key]
     }));
   };
 
@@ -566,50 +578,145 @@ function MatchesList({ matches, justifications, setJustifications }) {
     { value: 'other', label: 'Otro (revisar)' }
   ];
 
+  // Apply filters
+  const filteredMatches = matches.filter(set => {
+    // Check if set has unjustified payments
+    if (showOnlyUnjustified) {
+      const hasUnjustified = set.some(r => {
+        const rowKey = `${r.SetID}-${r.PagoKey}`;
+        const justification = justifications[rowKey];
+        return r.MatchMethod === 'Unallocated' && (!justification || justification === '');
+      });
+      if (!hasUnjustified) return false;
+    }
+
+    // Filter by method
+    if (filterMethod !== 'all') {
+      const hasMethod = set.some(r => r.MatchMethod === filterMethod);
+      if (!hasMethod) return false;
+    }
+
+    return true;
+  });
+
   if (matches.length === 0) return <div style={{ textAlign: 'center', color: 'var(--text-muted)' }}>No se encontraron emparejamientos.</div>;
 
   return (
-    <div style={{ display: 'grid', gap: '1.5rem' }}>
-      {matches.slice(0, 100).map((set, i) => {
+    <div>
+      {/* Filter Controls */}
+      <div style={{
+        display: 'flex',
+        gap: '1rem',
+        marginBottom: '1.5rem',
+        padding: '1rem',
+        background: 'rgba(0,0,0,0.3)',
+        borderRadius: '0.5rem',
+        flexWrap: 'wrap'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Método:</label>
+          <select
+            value={filterMethod}
+            onChange={(e) => setFilterMethod(e.target.value)}
+            style={{
+              padding: '0.3rem 0.5rem',
+              borderRadius: '0.25rem',
+              background: 'rgba(255,255,255,0.1)',
+              color: 'white',
+              border: '1px solid rgba(255,255,255,0.2)',
+              fontSize: '0.8rem'
+            }}
+          >
+            <option value="all">Todos</option>
+            <option value="Reference">Referencia</option>
+            <option value="Exact">Exacto</option>
+            <option value="DateProximity">Proximidad Fecha</option>
+            <option value="FIFO">FIFO</option>
+            <option value="Unallocated">Sin asignar</option>
+          </select>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <input
+            type="checkbox"
+            id="showUnjustified"
+            checked={showOnlyUnjustified}
+            onChange={(e) => setShowOnlyUnjustified(e.target.checked)}
+          />
+          <label htmlFor="showUnjustified" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
+            Solo sin justificar
+          </label>
+        </div>
+
+        <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+          Mostrando {filteredMatches.length} de {matches.length} grupos
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gap: '1.5rem' }}>
+      {filteredMatches.slice(0, 100).map((set, cardIndex) => {
         const tercero = set[0].Tercero;
+
+        // Group data by invoices (DocKey) and their payments
+        const invoiceMap = {};
+        const unmatchedPayments = [];
+
+        set.forEach(row => {
+          if (row.DocKey && !row.PagoKey) {
+            // Pure invoice (not yet matched)
+            if (!invoiceMap[row.DocKey]) {
+              invoiceMap[row.DocKey] = {
+                invoice: row,
+                payments: []
+              };
+            }
+          } else if (row.DocKey && row.PagoKey) {
+            // Matched invoice-payment pair
+            if (!invoiceMap[row.DocKey]) {
+              invoiceMap[row.DocKey] = {
+                invoice: row,
+                payments: []
+              };
+            }
+            invoiceMap[row.DocKey].payments.push(row);
+          } else if (!row.DocKey && row.PagoKey) {
+            // Unmatched payment
+            unmatchedPayments.push(row);
+          }
+        });
 
         // Calculate totals and status
         const invoiceRows = set.filter(r => r.DocKey && r.PagoKey);
         const totalPaid = invoiceRows.reduce((sum, row) => sum + Math.abs(row.Asignado || 0), 0);
         const totalPending = invoiceRows.reduce((sum, row) => sum + (row.ResidualFacturaTras || 0), 0);
-        const hasUnmatched = set.some(r => r.Asignado < 0);
+        const hasUnmatched = unmatchedPayments.length > 0;
         const hasPartial = set.some(r => r.ResidualFacturaTras > 0.01);
-        const numInvoices = new Set(set.filter(r => r.DocKey).map(r => r.DocKey)).size;
-        const numPayments = new Set(set.filter(r => r.PagoKey).map(r => r.PagoKey)).size;
+        const numInvoices = Object.keys(invoiceMap).length;
+        const numPayments = unmatchedPayments.length + invoiceRows.length;
 
-        // Determine overall status - VERY CLEAR LOGIC
-        // Check if any unmatched payment in this set has been justified
-        const hasJustification = set.some(r => {
+        // Determine overall status
+        const hasJustification = unmatchedPayments.some(r => {
           const rowKey = `${r.SetID}-${r.PagoKey}`;
           return justifications[rowKey] && justifications[rowKey] !== '' && justifications[rowKey] !== 'other';
         });
 
         let statusColor, statusBg, statusText, statusIcon;
         if (hasUnmatched && hasJustification) {
-          // GREEN: Justified payment
           statusColor = '#10B981';
           statusBg = 'rgba(16, 185, 129, 0.15)';
           statusText = 'Justificado';
           statusIcon = '🟢';
         } else if (hasUnmatched) {
-          // RED: Payment without invoice
           statusColor = '#EF4444';
           statusBg = 'rgba(239, 68, 68, 0.15)';
           statusText = 'Sin Factura';
           statusIcon = '🔴';
         } else if (hasPartial || totalPending > 0.01) {
-          // ORANGE: Partial payment
           statusColor = '#F59E0B';
           statusBg = 'rgba(245, 158, 11, 0.15)';
           statusText = 'Pago Parcial';
           statusIcon = '🟠';
         } else {
-          // GREEN: Fully paid
           statusColor = '#10B981';
           statusBg = 'rgba(16, 185, 129, 0.15)';
           statusText = 'Totalmente Pagado';
@@ -617,7 +724,7 @@ function MatchesList({ matches, justifications, setJustifications }) {
         }
 
         return (
-          <div key={i} style={{
+          <div key={cardIndex} style={{
             background: 'rgba(0,0,0,0.3)',
             borderRadius: '12px',
             padding: '1.5rem',
@@ -626,14 +733,14 @@ function MatchesList({ matches, justifications, setJustifications }) {
           }}>
             {/* Header - Clickable */}
             <div
-              onClick={() => toggleCard(i)}
+              onClick={() => toggleCard(cardIndex)}
               style={{
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
-                marginBottom: collapsedCards[i] ? '0' : '1.25rem',
-                paddingBottom: collapsedCards[i] ? '0' : '1rem',
-                borderBottom: collapsedCards[i] ? 'none' : `2px solid ${statusColor}60`,
+                marginBottom: collapsedCards[cardIndex] ? '0' : '1.25rem',
+                paddingBottom: collapsedCards[cardIndex] ? '0' : '1rem',
+                borderBottom: collapsedCards[cardIndex] ? 'none' : `2px solid ${statusColor}60`,
                 cursor: 'pointer',
                 transition: 'all 0.2s ease',
                 userSelect: 'none'
@@ -648,7 +755,7 @@ function MatchesList({ matches, justifications, setJustifications }) {
                   fontSize: '1.2rem',
                   fontWeight: '700',
                   transition: 'transform 0.2s ease',
-                  transform: collapsedCards[i] ? 'rotate(0deg)' : 'rotate(90deg)'
+                  transform: collapsedCards[cardIndex] ? 'rotate(0deg)' : 'rotate(90deg)'
                 }}>
                   ▶
                 </div>
@@ -675,296 +782,351 @@ function MatchesList({ matches, justifications, setJustifications }) {
               </div>
             </div>
 
-            {/* Table - Conditionally rendered */}
-            {!collapsedCards[i] && (
+            {/* Content - Grouped by Invoices */}
+            {!collapsedCards[cardIndex] && (
               <>
-                <table style={{ width: '100%', fontSize: '0.75rem', borderCollapse: 'separate', borderSpacing: '0 0.3rem' }}>
-                  <thead>
-                    <tr style={{ color: 'var(--text-muted)', textAlign: 'left', fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.3px' }}>
-                      <th style={{ padding: '0.4rem 0.5rem' }}>Tipo</th>
-                      <th style={{ padding: '0.4rem 0.5rem' }}>Fecha</th>
-                      <th style={{ padding: '0.4rem 0.5rem' }}>Documento</th>
-                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>Importe Asignado</th>
-                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>Saldo Pendiente</th>
-                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>Estado</th>
-                      <th style={{ padding: '0.4rem 0.5rem', textAlign: 'left' }}>Justificación</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {set.map((row, j) => {
-                      const isInvoice = row.DocKey && !row.PagoKey;
-                      const isPayment = row.PagoKey && !row.DocKey;
-                      const isMatch = row.DocKey && row.PagoKey;
-                      const isUnmatched = row.Asignado < 0;
-                      const hasPending = row.ResidualFacturaTras > 0.01;
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {/* Invoices with their payments */}
+                  {Object.entries(invoiceMap).map(([docKey, { invoice, payments }], invoiceIndex) => {
+                    const invoiceTotal = invoice.Asignado || 0;
+                    const totalPaid = payments.reduce((sum, p) => sum + Math.abs(p.Asignado || 0), 0);
+                    const residual = invoice.ResidualFacturaTras || 0;
+                    const isPartial = residual > 0.01;
+                    const rowKey = `${cardIndex}-invoice-${invoiceIndex}`;
+                    const isExpanded = expandedRows[rowKey];
 
-                      // Check justification for this row
-                      const rowKey = `${row.SetID}-${row.PagoKey}`;
-                      const rowJustification = justifications[rowKey] || '';
-                      const isJustified = rowJustification && rowJustification !== '' && rowJustification !== 'other';
-
-                      // Row-level color coding
-                      let rowBg, rowBorder, rowStatusColor;
-                      if (isUnmatched && isJustified) {
-                        // GREEN: Justified unmatched payment
-                        rowBg = 'rgba(16, 185, 129, 0.1)';
-                        rowBorder = '4px solid #10B981';
-                        rowStatusColor = '#10B981';
-                      } else if (isUnmatched) {
-                        // RED: Unmatched payment
-                        rowBg = 'rgba(239, 68, 68, 0.1)';
-                        rowBorder = '4px solid #EF4444';
-                        rowStatusColor = '#EF4444';
-                      } else if (hasPending) {
-                        // ORANGE: Partial
-                        rowBg = 'rgba(245, 158, 11, 0.1)';
-                        rowBorder = '4px solid #F59E0B';
-                        rowStatusColor = '#F59E0B';
-                      } else {
-                        // GREEN: OK
-                        rowBg = 'rgba(16, 185, 129, 0.1)';
-                        rowBorder = '4px solid #10B981';
-                        rowStatusColor = '#10B981';
-                      }
-
-                      return (
-                        <tr key={j} style={{
-                          background: rowBg,
-                          borderLeft: rowBorder,
-                          borderRadius: '8px'
-                        }}>
-                          <td style={{ padding: '0.4rem 0.5rem', borderRadius: '8px 0 0 8px' }}>
-                            {isMatch && (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                <div style={{
-                                  fontSize: '0.65rem',
-                                  fontWeight: '800',
-                                  color: '#10B981',
-                                  textTransform: 'uppercase',
-                                  letterSpacing: '0.03em'
-                                }}>Match</div>
-                                {row.MatchMethod && (
-                                  <span style={{
-                                    fontSize: '0.6rem',
-                                    fontWeight: '700',
-                                    padding: '2px 6px',
-                                    borderRadius: '3px',
-                                    background:
-                                      row.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
-                                        row.MatchMethod === 'Exact' ? 'rgba(16, 185, 129, 0.2)' :
-                                          row.MatchMethod === 'FIFO' ? 'rgba(168, 85, 247, 0.2)' :
-                                            'rgba(120, 120, 128, 0.2)',
-                                    color:
-                                      row.MatchMethod === 'Reference' ? '#10B981' :
-                                        row.MatchMethod === 'Exact' ? '#10B981' :
-                                          row.MatchMethod === 'FIFO' ? '#A855F7' :
-                                            '#6B7280',
-                                    border: `1px solid ${row.MatchMethod === 'Reference' ? '#10B981' :
-                                      row.MatchMethod === 'Exact' ? '#3B82F6' :
-                                        row.MatchMethod === 'FIFO' ? '#A855F7' :
-                                          '#6B7280'
-                                      }`,
-                                    display: 'inline-block'
-                                  }}>
-                                    {row.MatchMethod.toUpperCase()}
-                                  </span>
-                                )}
-                              </div>
-                            )}
-                            {isInvoice && (
+                    return (
+                      <div key={docKey} style={{
+                        background: isPartial ? 'rgba(245, 158, 11, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+                        borderRadius: '8px',
+                        border: isPartial ? '2px solid #F59E0B' : '2px solid #10B981',
+                        overflow: 'hidden'
+                      }}>
+                        {/* Invoice Header */}
+                        <div
+                          onClick={() => toggleRowDetails(cardIndex, `invoice-${invoiceIndex}`)}
+                          style={{
+                            padding: '0.75rem 1rem',
+                            background: isPartial ? 'rgba(245, 158, 11, 0.1)' : 'rgba(16, 185, 129, 0.1)',
+                            cursor: 'pointer',
+                            display: 'grid',
+                            gridTemplateColumns: '30px 1fr auto auto',
+                            gap: '1rem',
+                            alignItems: 'center',
+                            transition: 'all 0.2s ease'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+                          onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                        >
+                          <div style={{
+                            fontSize: '0.9rem',
+                            transition: 'transform 0.2s ease',
+                            transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                            color: isPartial ? '#F59E0B' : '#10B981'
+                          }}>▶</div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                               <span style={{
-                                color: '#3B82F6',
-                                fontWeight: '700',
                                 fontSize: '0.65rem',
+                                fontWeight: '700',
+                                color: '#3B82F6',
                                 background: 'rgba(59, 130, 246, 0.15)',
                                 padding: '3px 8px',
                                 borderRadius: '3px',
                                 border: '1px solid #3B82F6',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>Factura</span>
-                            )}
-                            {isPayment && (
-                              <span style={{
-                                color: '#EF4444',
-                                fontWeight: '700',
-                                fontSize: '0.65rem',
-                                background: 'rgba(239, 68, 68, 0.15)',
-                                padding: '3px 8px',
-                                borderRadius: '3px',
-                                border: '1px solid #EF4444',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>Pago</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem', color: 'var(--text-muted)', fontSize: '0.7rem' }}>
-                            {isMatch ? (
-                              <div style={{ fontSize: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                                <div style={{ fontWeight: '600', color: '#3B82F6' }}>{row.Fecha_doc}</div>
-                                <div style={{ color: '#EC4899', fontWeight: '600' }}>{row.Fecha_pago}</div>
-                              </div>
-                            ) : (
-                              row.Fecha_doc || row.Fecha_pago || '-'
-                            )}
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {isMatch ? (
-                              <div style={{ fontSize: '0.7rem', display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                                <div title={row.DocKey} style={{ fontWeight: '600', color: '#3B82F6' }}>{row.DocKey ? row.DocKey.split('|')[1] : '-'}</div>
-                                <div style={{ color: '#EC4899', fontWeight: '600' }} title={row.PagoKey}>{row.PagoKey ? row.PagoKey.split('|')[1] : '-'}</div>
-                              </div>
-                            ) : (
-                              <span title={row.DocKey || row.PagoKey} style={{ fontSize: '0.7rem' }}>
-                                {(row.DocKey || row.PagoKey) ? (row.DocKey || row.PagoKey).split('|')[1] : '-'}
+                                textTransform: 'uppercase'
+                              }}>📄 Factura</span>
+                              <span style={{ fontSize: '0.85rem', fontWeight: '600', color: '#e2e8f0' }}>
+                                {docKey.split('|')[1]}
                               </span>
-                            )}
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>
-                            <div style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              color: rowStatusColor,
-                              fontWeight: '700',
-                              background: `${rowStatusColor}20`,
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                              fontSize: '0.75rem',
-                              border: `2px solid ${rowStatusColor}`
-                            }}>
-                              {Math.abs(row.Asignado)?.toFixed(2)} €
                             </div>
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'right' }}>
-                            {row.ResidualFacturaTras !== null && row.ResidualFacturaTras !== undefined && !isPayment ? (
-                              <div style={{
-                                display: 'inline-flex',
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                              Fecha: {invoice.Fecha_doc}
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Importe</div>
+                            <div style={{ fontSize: '0.9rem', fontWeight: '700', color: '#3B82F6' }}>
+                              {Math.abs(invoiceTotal).toFixed(2)} €
+                            </div>
+                          </div>
+                          <div style={{ textAlign: 'right' }}>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '2px' }}>Pendiente</div>
+                            <div style={{
+                              fontSize: '0.9rem',
+                              fontWeight: '700',
+                              color: isPartial ? '#EF4444' : '#10B981'
+                            }}>
+                              {residual.toFixed(2)} €
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Expanded Invoice Details */}
+                        {isExpanded && (
+                          <div style={{
+                            padding: '0.75rem 1rem',
+                            background: 'rgba(0,0,0,0.2)',
+                            fontSize: '0.75rem',
+                            borderTop: '1px solid rgba(255,255,255,0.1)'
+                          }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem' }}>
+                              <div><strong>Cuenta:</strong> {invoice.Cuenta}</div>
+                              <div><strong>Tercero:</strong> {invoice.Tercero}</div>
+                              <div><strong>Documento:</strong> {invoice.Documento || '-'}</div>
+                              <div><strong>Concepto:</strong> {invoice.Concepto || '-'}</div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Payments for this invoice */}
+                        {payments.length > 0 && (
+                          <div style={{ padding: '0 1rem 0.75rem 1rem' }}>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '0.5rem', marginLeft: '30px' }}>
+                              💳 Pagos asociados ({payments.length}):
+                            </div>
+                            {payments.map((payment, payIdx) => {
+                              const paymentKey = `${cardIndex}-payment-${invoiceIndex}-${payIdx}`;
+                              const isPayExpanded = expandedRows[paymentKey];
+
+                              return (
+                                <div key={payIdx} style={{
+                                  marginLeft: '30px',
+                                  marginBottom: '0.5rem',
+                                  background: 'rgba(0,0,0,0.2)',
+                                  borderRadius: '6px',
+                                  border: '1px solid rgba(255,255,255,0.1)',
+                                  overflow: 'hidden'
+                                }}>
+                                  <div
+                                    onClick={() => toggleRowDetails(cardIndex, `payment-${invoiceIndex}-${payIdx}`)}
+                                    style={{
+                                      padding: '0.5rem 0.75rem',
+                                      cursor: 'pointer',
+                                      display: 'grid',
+                                      gridTemplateColumns: '20px auto 1fr auto auto',
+                                      gap: '0.75rem',
+                                      alignItems: 'center',
+                                      transition: 'all 0.2s ease'
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+                                    onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                                  >
+                                    <div style={{
+                                      fontSize: '0.7rem',
+                                      transition: 'transform 0.2s ease',
+                                      transform: isPayExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                                      color: '#EC4899'
+                                    }}>▶</div>
+                                    <span style={{
+                                      fontSize: '0.6rem',
+                                      fontWeight: '700',
+                                      padding: '2px 6px',
+                                      borderRadius: '3px',
+                                      background:
+                                        payment.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
+                                          payment.MatchMethod === 'Exact' ? 'rgba(16, 185, 129, 0.2)' :
+                                            payment.MatchMethod === 'DateProximity' ? 'rgba(59, 130, 246, 0.2)' :
+                                              'rgba(168, 85, 247, 0.2)',
+                                      color:
+                                        payment.MatchMethod === 'Reference' ? '#10B981' :
+                                          payment.MatchMethod === 'Exact' ? '#10B981' :
+                                            payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
+                                              '#A855F7',
+                                      border: `1px solid ${payment.MatchMethod === 'Reference' ? '#10B981' :
+                                        payment.MatchMethod === 'Exact' ? '#10B981' :
+                                          payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
+                                            '#A855F7'
+                                        }`,
+                                      textTransform: 'uppercase'
+                                    }}>
+                                      {payment.MatchMethod}
+                                    </span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                      <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#EC4899' }}>
+                                        {payment.PagoKey ? payment.PagoKey.split('|')[1] : '-'}
+                                      </div>
+                                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                        {payment.Fecha_pago}
+                                      </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                      <div style={{
+                                        fontSize: '0.8rem',
+                                        fontWeight: '700',
+                                        color: '#EC4899'
+                                      }}>
+                                        {Math.abs(payment.Asignado || 0).toFixed(2)} €
+                                      </div>
+                                    </div>
+                                    <div style={{ textAlign: 'right' }}>
+                                      {payment.ResidualFacturaTras !== null && payment.ResidualFacturaTras !== undefined ? (
+                                        <div style={{
+                                          fontSize: '0.75rem',
+                                          fontWeight: '700',
+                                          color: payment.ResidualFacturaTras > 0.01 ? '#EF4444' : '#10B981'
+                                        }}>
+                                          Resta: {payment.ResidualFacturaTras.toFixed(2)} €
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                  </div>
+
+                                  {/* Expanded Payment Details */}
+                                  {isPayExpanded && (
+                                    <div style={{
+                                      padding: '0.5rem 0.75rem',
+                                      background: 'rgba(0,0,0,0.3)',
+                                      fontSize: '0.7rem',
+                                      borderTop: '1px solid rgba(255,255,255,0.1)'
+                                    }}>
+                                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem' }}>
+                                        <div><strong>Cuenta:</strong> {payment.Cuenta}</div>
+                                        <div><strong>Documento:</strong> {payment.Documento || '-'}</div>
+                                        <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto || '-'}</div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {/* Unmatched Payments Section */}
+                  {unmatchedPayments.length > 0 && (
+                    <div style={{
+                      background: 'rgba(239, 68, 68, 0.08)',
+                      borderRadius: '8px',
+                      border: '2px solid #EF4444',
+                      padding: '1rem'
+                    }}>
+                      <div style={{
+                        fontSize: '0.85rem',
+                        fontWeight: '700',
+                        color: '#EF4444',
+                        marginBottom: '0.75rem',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.05em'
+                      }}>
+                        ⚠️ Pagos sin factura ({unmatchedPayments.length})
+                      </div>
+                      {unmatchedPayments.map((payment, payIdx) => {
+                        const rowKey = `${payment.SetID}-${payment.PagoKey}`;
+                        const rowJustification = justifications[rowKey] || '';
+                        const isJustified = rowJustification && rowJustification !== '' && rowJustification !== 'other';
+                        const unmatchedPayKey = `${cardIndex}-unmatched-${payIdx}`;
+                        const isPayExpanded = expandedRows[unmatchedPayKey];
+
+                        return (
+                          <div key={payIdx} style={{
+                            marginBottom: '0.5rem',
+                            background: isJustified ? 'rgba(16, 185, 129, 0.1)' : 'rgba(239, 68, 68, 0.15)',
+                            borderRadius: '6px',
+                            border: isJustified ? '2px solid #10B981' : '2px solid #EF4444',
+                            overflow: 'hidden'
+                          }}>
+                            <div
+                              onClick={() => toggleRowDetails(cardIndex, `unmatched-${payIdx}`)}
+                              style={{
+                                padding: '0.5rem 0.75rem',
+                                cursor: 'pointer',
+                                display: 'grid',
+                                gridTemplateColumns: '20px 1fr auto auto',
+                                gap: '0.75rem',
                                 alignItems: 'center',
-                                gap: '4px',
-                                color: row.ResidualFacturaTras > 0.01 ? '#EF4444' : '#10B981',
-                                fontWeight: '700',
-                                background: row.ResidualFacturaTras > 0.01 ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                                padding: '4px 8px',
-                                borderRadius: '4px',
-                                fontSize: '0.75rem',
-                                border: row.ResidualFacturaTras > 0.01 ? '2px solid #EF4444' : '2px solid #10B981'
-                              }}>
-                                {row.ResidualFacturaTras > 0.01 ? <AlertCircle size={12} /> : <CheckCircle size={12} />}
-                                {row.ResidualFacturaTras?.toFixed(2)} €
+                                transition: 'all 0.2s ease'
+                              }}
+                              onMouseEnter={(e) => e.currentTarget.style.opacity = '0.8'}
+                              onMouseLeave={(e) => e.currentTarget.style.opacity = '1'}
+                            >
+                              <div style={{
+                                fontSize: '0.7rem',
+                                transition: 'transform 0.2s ease',
+                                transform: isPayExpanded ? 'rotate(90deg)' : 'rotate(0deg)',
+                                color: isJustified ? '#10B981' : '#EF4444'
+                              }}>▶</div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#EF4444' }}>
+                                  💸 {payment.PagoKey ? payment.PagoKey.split('|')[1] : '-'}
+                                </div>
+                                <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                  {payment.Fecha_pago}
+                                </div>
                               </div>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>-</span>
+                              <div style={{ textAlign: 'right' }}>
+                                <div style={{
+                                  fontSize: '0.8rem',
+                                  fontWeight: '700',
+                                  color: '#EF4444'
+                                }}>
+                                  {Math.abs(payment.Asignado || 0).toFixed(2)} €
+                                </div>
+                              </div>
+                              <div style={{ minWidth: '150px' }}>
+                                <select
+                                  value={rowJustification}
+                                  onChange={(e) => {
+                                    e.stopPropagation();
+                                    const newJustifications = { ...justifications };
+                                    if (e.target.value === '') {
+                                      delete newJustifications[rowKey];
+                                    } else {
+                                      newJustifications[rowKey] = e.target.value;
+                                    }
+                                    setJustifications(newJustifications);
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  style={{
+                                    padding: '4px 8px',
+                                    borderRadius: '4px',
+                                    border: `1px solid ${isJustified ? '#10B981' : '#EF4444'}`,
+                                    background: 'rgba(0,0,0,0.3)',
+                                    color: 'white',
+                                    fontSize: '0.7rem',
+                                    fontWeight: '600',
+                                    cursor: 'pointer',
+                                    width: '100%',
+                                    outline: 'none'
+                                  }}
+                                >
+                                  {justificationOptions.map(opt => (
+                                    <option key={opt.value} value={opt.value} style={{ background: '#1e293b', color: 'white' }}>
+                                      {opt.label}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+
+                            {/* Expanded Unmatched Payment Details */}
+                            {isPayExpanded && (
+                              <div style={{
+                                padding: '0.5rem 0.75rem',
+                                background: 'rgba(0,0,0,0.3)',
+                                fontSize: '0.7rem',
+                                borderTop: '1px solid rgba(255,255,255,0.1)'
+                              }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.4rem' }}>
+                                  <div><strong>Cuenta:</strong> {payment.Cuenta}</div>
+                                  <div><strong>Documento:</strong> {payment.Documento || '-'}</div>
+                                  <div style={{ gridColumn: '1 / -1' }}><strong>Concepto:</strong> {payment.Concepto || '-'}</div>
+                                </div>
+                              </div>
                             )}
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem', textAlign: 'center' }}>
-                            {isUnmatched && isJustified ? (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: '700',
-                                color: '#10B981',
-                                background: 'rgba(16, 185, 129, 0.2)',
-                                padding: '4px 10px',
-                                borderRadius: '4px',
-                                border: '1px solid #10B981',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>
-                                Justificado
-                              </span>
-                            ) : isUnmatched ? (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: '700',
-                                color: '#EF4444',
-                                background: 'rgba(239, 68, 68, 0.2)',
-                                padding: '4px 10px',
-                                borderRadius: '4px',
-                                border: '1px solid #EF4444',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>
-                                Sin Factura
-                              </span>
-                            ) : row.ResidualFacturaTras > 0.01 ? (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: '700',
-                                color: '#F59E0B',
-                                background: 'rgba(245, 158, 11, 0.2)',
-                                padding: '4px 10px',
-                                borderRadius: '4px',
-                                border: '1px solid #F59E0B',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>
-                                Parcial
-                              </span>
-                            ) : (
-                              <span style={{
-                                fontSize: '0.65rem',
-                                fontWeight: '700',
-                                color: '#10B981',
-                                background: 'rgba(16, 185, 129, 0.2)',
-                                padding: '4px 10px',
-                                borderRadius: '4px',
-                                border: '1px solid #10B981',
-                                textTransform: 'uppercase',
-                                letterSpacing: '0.03em'
-                              }}>
-                                Pagado
-                              </span>
-                            )}
-                          </td>
-                          <td style={{ padding: '0.4rem 0.5rem' }}>
-                            {isUnmatched ? (
-                              <select
-                                value={rowJustification}
-                                onChange={(e) => {
-                                  const newJustifications = { ...justifications };
-                                  if (e.target.value === '') {
-                                    delete newJustifications[rowKey];
-                                  } else {
-                                    newJustifications[rowKey] = e.target.value;
-                                  }
-                                  setJustifications(newJustifications);
-                                }}
-                                style={{
-                                  padding: '4px 8px',
-                                  borderRadius: '4px',
-                                  border: `1px solid ${isJustified ? '#10B981' : '#EF4444'}`,
-                                  background: 'rgba(0,0,0,0.3)',
-                                  color: 'white',
-                                  fontSize: '0.7rem',
-                                  fontWeight: '600',
-                                  cursor: 'pointer',
-                                  width: '100%',
-                                  maxWidth: '180px',
-                                  outline: 'none',
-                                  transition: 'all 0.2s ease'
-                                }}
-                                onMouseEnter={(e) => e.target.style.borderColor = '#10B981'}
-                                onMouseLeave={(e) => e.target.style.borderColor = isJustified ? '#10B981' : '#EF4444'}
-                              >
-                                {justificationOptions.map(opt => (
-                                  <option key={opt.value} value={opt.value} style={{ background: '#1e293b', color: 'white' }}>
-                                    {opt.label}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>-</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
 
                 {/* Summary Footer */}
                 <div style={{
-                  marginTop: '1rem',
+                  marginTop: '1.5rem',
                   padding: '1rem',
                   background: 'rgba(0,0,0,0.4)',
                   borderRadius: '8px',
@@ -1004,11 +1166,12 @@ function MatchesList({ matches, justifications, setJustifications }) {
           </div>
         );
       })}
-      {matches.length > 100 && (
+      {filteredMatches.length > 100 && (
         <div style={{ textAlign: 'center', padding: '1rem', color: 'var(--text-muted)' }}>
-          ... y {matches.length - 100} grupos más (descarga el Excel para ver todos)
+          ... y {filteredMatches.length - 100} grupos más (descarga el Excel para ver todos)
         </div>
       )}
+      </div>
     </div>
   );
 }

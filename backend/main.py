@@ -20,19 +20,36 @@ app.add_middleware(
 def read_root():
     return {"message": "Conciliador FIFO API is running"}
 
+from pydantic import BaseModel
+from typing import Dict, Optional
+
+class ConciliationRequest(BaseModel):
+    justifications: Optional[Dict[str, str]] = None
+
 @app.post("/conciliate")
 async def conciliate_endpoint(
     file: UploadFile = File(...),
     tol: float = 0.01,
     ar_prefix: str = "43",
-    ap_prefix: str = "40"
+    ap_prefix: str = "40",
+    justifications: Optional[str] = None  # JSON string of justifications
 ):
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Invalid file format. Please upload an Excel file (.xlsx).")
 
     try:
         contents = await file.read()
-        response_data, output_excel = process_excel(contents, tol, ar_prefix, ap_prefix)
+
+        # Parse justifications if provided
+        import json
+        justifications_dict = None
+        if justifications:
+            try:
+                justifications_dict = json.loads(justifications)
+            except:
+                justifications_dict = None
+
+        response_data, output_excel = process_excel(contents, tol, ar_prefix, ap_prefix, justifications_dict)
         
         import base64
         b64_file = base64.b64encode(output_excel.getvalue()).decode()
