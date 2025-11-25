@@ -583,8 +583,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         )
         
         counts = df["_collective"].value_counts().to_dict()
-        meta_info["Filas_AR"] = counts.get("AR", 0)
-        meta_info["Filas_AP"] = counts.get("AP", 0)
+        meta_info["Filas_Clientes"] = counts.get("AR", 0)
+        meta_info["Filas_Proveedores"] = counts.get("AP", 0)
         meta_rows.append(meta_info)
 
         df["_tercero"] = df[sch["tercero"]] if sch["tercero"] else np.nan
@@ -631,8 +631,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         ar_all = pd.concat(ar_rows, ignore_index=True)
         ar_all["idx"] = np.arange(len(ar_all))
         det_ar = reconcile_fifo(ar_all, tol=tol)
-        out_sheets["AR_Detalle"] = det_ar
-        out_sheets["Pendientes_AR"] = build_pendientes(det_ar, tol)
+        out_sheets["Clientes_Detalle"] = det_ar
+        out_sheets["Pendientes_Clientes"] = build_pendientes(det_ar, tol)
 
     # AP Processing
     det_ap = pd.DataFrame()
@@ -640,8 +640,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         ap_all = pd.concat(ap_rows, ignore_index=True)
         ap_all["idx"] = np.arange(len(ap_all))
         det_ap = reconcile_fifo(ap_all, tol=tol)
-        out_sheets["AP_Detalle"] = det_ap
-        out_sheets["Pendientes_AP"] = build_pendientes(det_ap, tol)
+        out_sheets["Proveedores_Detalle"] = det_ap
+        out_sheets["Pendientes_Proveedores"] = build_pendientes(det_ap, tol)
 
     # Summary
     def quick_summary(df: pd.DataFrame, name: str, pend_sheet: str) -> Dict:
@@ -666,8 +666,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         }
 
     summary_list = [
-        quick_summary(det_ar, "AR", "Pendientes_AR"),
-        quick_summary(det_ap, "AP", "Pendientes_AP")
+        quick_summary(det_ar, "Clientes", "Pendientes_Clientes"),
+        quick_summary(det_ap, "Proveedores", "Pendientes_Proveedores")
     ]
     
     out_sheets["Resumen"] = pd.DataFrame(summary_list)
@@ -683,7 +683,7 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
 
     # Add justifications to detail sheets if provided
     if justifications:
-        for sheet_name in ["AR_Detalle", "AP_Detalle"]:
+        for sheet_name in ["Clientes_Detalle", "Proveedores_Detalle"]:
             if sheet_name in out_sheets and not out_sheets[sheet_name].empty:
                 df = out_sheets[sheet_name]
                 # Add justification column
@@ -720,7 +720,7 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
     # Convert DataFrames to dict records for JSON response
     details = {}
     for name, df in out_sheets.items():
-        if name in ["AR_Detalle", "AP_Detalle", "Pendientes_AR", "Pendientes_AP"]:
+        if name in ["Clientes_Detalle", "Proveedores_Detalle", "Pendientes_Clientes", "Pendientes_Proveedores"]:
             # Create a copy to avoid SettingWithCopy warnings
             df_clean = df.copy()
             

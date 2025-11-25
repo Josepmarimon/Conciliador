@@ -6,75 +6,49 @@ function HelpModal({ isOpen, onClose }) {
 
     return (
         <div style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0, 0, 0, 0.85)',
-            backdropFilter: 'blur(8px)',
-            zIndex: 2000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '2rem',
-            overflowY: 'auto'
-        }}
-            onClick={onClose}
-        >
+            background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
+            borderRadius: '1rem',
+            width: '100%',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+        }}>
+            {/* Header */}
             <div style={{
-                background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-                borderRadius: '1rem',
-                maxWidth: '900px',
-                width: '100%',
-                maxHeight: '90vh',
-                overflowY: 'auto',
-                border: '1px solid rgba(255, 255, 255, 0.1)',
-                boxShadow: '0 20px 60px rgba(0, 0, 0, 0.5)'
-            }}
-                onClick={(e) => e.stopPropagation()}
-            >
-                {/* Header */}
-                <div style={{
-                    padding: '2rem',
-                    borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    position: 'sticky',
-                    top: 0,
-                    background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
-                    zIndex: 1
-                }}>
-                    <div>
-                        <h2 style={{ fontSize: '1.75rem', fontWeight: '700', margin: 0, color: 'white' }}>
-                            Sistema de Conciliación Automática
-                        </h2>
-                        <p style={{ fontSize: '0.95rem', color: 'var(--color-label-secondary)', margin: '0.5rem 0 0 0' }}>
-                            Guía profesional de funcionamiento
-                        </p>
-                    </div>
-                    <button
-                        onClick={onClose}
-                        style={{
-                            background: 'rgba(255, 255, 255, 0.1)',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '40px',
-                            height: '40px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s ease',
-                            color: 'white'
-                        }}
-                        onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
-                        onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.1)'}
-                    >
-                        <X size={20} />
-                    </button>
+                padding: '2rem',
+                borderBottom: '1px solid rgba(255, 255, 255, 0.1)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+            }}>
+                <div>
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: '700', margin: 0, color: 'white' }}>
+                        Sistema de Conciliación Automática
+                    </h2>
+                    <p style={{ fontSize: '0.95rem', color: 'var(--color-label-secondary)', margin: '0.5rem 0 0 0' }}>
+                        Guía profesional de funcionamiento
+                    </p>
                 </div>
+                <button
+                    onClick={onClose}
+                    style={{
+                        background: 'rgba(255, 255, 255, 0.1)',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '40px',
+                        height: '40px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        transition: 'all 0.2s ease',
+                        color: 'white'
+                    }}
+                    onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
+                    onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.1)'}
+                >
+                    <X size={20} />
+                </button>
+            </div>
 
                 {/* Content */}
                 <div style={{ padding: '2rem' }}>
@@ -92,7 +66,8 @@ function HelpModal({ isOpen, onClose }) {
                         <p style={{ fontSize: '0.95rem', lineHeight: '1.6', color: '#cbd5e1', margin: 0 }}>
                             El sistema empareja automáticamente <strong>facturas</strong> (importes positivos) con <strong>pagos</strong> (importes negativos)
                             utilizando un algoritmo inteligente en <strong>3 fases secuenciales</strong>. Cada fase tiene un método diferente para
-                            encontrar la mejor coincidencia.
+                            encontrar la mejor coincidencia. Los resultados se organizan por <strong>Clientes (AR)</strong> y <strong>Proveedores (AP)</strong>,
+                            mostrando tanto los emparejamientos exitosos como los pendientes que requieren atención.
                         </p>
                     </div>
 
@@ -321,10 +296,53 @@ function HelpModal({ isOpen, onClose }) {
                         </div>
                     </div>
 
+                    {/* UI Navigation */}
+                    <div style={{ marginBottom: '2rem' }}>
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: '600', margin: '0 0 1rem 0', color: 'white' }}>
+                            🎯 Navegación de la Interfaz
+                        </h3>
+
+                        <div style={{
+                            background: 'rgba(0, 0, 0, 0.3)',
+                            borderRadius: '0.75rem',
+                            padding: '1.5rem',
+                            borderLeft: '4px solid #06b6d4'
+                        }}>
+                            <p style={{ fontSize: '0.95rem', lineHeight: '1.6', color: '#cbd5e1', marginBottom: '1rem' }}>
+                                La interfaz organiza los resultados en dos niveles de navegación:
+                            </p>
+
+                            <div style={{ marginBottom: '1rem' }}>
+                                <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#60a5fa', marginBottom: '0.5rem' }}>
+                                    📂 Nivel 1: Tipo de Cuenta
+                                </div>
+                                <div style={{ paddingLeft: '1rem', fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.6' }}>
+                                    • <strong>Clientes (AR)</strong>: Cuentas por cobrar - Facturas emitidas y pagos recibidos<br/>
+                                    • <strong>Proveedores (AP)</strong>: Cuentas por pagar - Facturas recibidas y pagos realizados
+                                </div>
+                            </div>
+
+                            <div>
+                                <div style={{ fontSize: '0.9rem', fontWeight: '600', color: '#10b981', marginBottom: '0.5rem' }}>
+                                    📋 Nivel 2: Estado de Emparejamiento
+                                </div>
+                                <div style={{ paddingLeft: '1rem', fontSize: '0.85rem', color: '#cbd5e1', lineHeight: '1.6' }}>
+                                    • <strong>✓ Emparejados</strong>: Pagos que se han vinculado exitosamente con facturas<br/>
+                                    &nbsp;&nbsp;- Agrupados por tercero (cliente/proveedor)<br/>
+                                    &nbsp;&nbsp;- Facturas expandibles con sus pagos asociados<br/>
+                                    &nbsp;&nbsp;- Filtros por método de emparejamiento<br/>
+                                    • <strong>⧗ Pendientes</strong>: Facturas que aún tienen saldo por cobrar/pagar<br/>
+                                    &nbsp;&nbsp;- Ordenadas por antigüedad (días pendientes)<br/>
+                                    &nbsp;&nbsp;- Requieren seguimiento o gestión de cobro/pago
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Special States */}
                     <div style={{ marginBottom: '2rem' }}>
                         <h3 style={{ fontSize: '1.25rem', fontWeight: '600', margin: '0 0 1rem 0', color: 'white' }}>
-                            📊 Estados Especiales
+                            📊 Estados y Códigos de Color
                         </h3>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -338,8 +356,8 @@ function HelpModal({ isOpen, onClose }) {
                                     🟠 Pago Parcial
                                 </div>
                                 <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: 0 }}>
-                                    Cuando un pago cubre solo parte de una factura. La columna <strong>Saldo Pendiente</strong> muestra
-                                    el importe restante.
+                                    Factura pagada parcialmente. El <strong>Residual Tras</strong> muestra el importe pendiente.
+                                    Aparece en ambas vistas: Emparejados (como pago parcial) y Pendientes (con saldo restante).
                                 </p>
                             </div>
 
@@ -353,8 +371,8 @@ function HelpModal({ isOpen, onClose }) {
                                     🔴 Pago sin Factura
                                 </div>
                                 <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: 0 }}>
-                                    Pago que no encuentra ninguna factura para emparejar. Aparece con <strong>Importe Asignado negativo</strong>.
-                                    Puede justificarse manualmente.
+                                    Pago que no encuentra factura. Aparece al final de la lista de emparejados.
+                                    <strong>Requiere justificación manual</strong> para documentar el motivo.
                                 </p>
                             </div>
 
@@ -368,7 +386,8 @@ function HelpModal({ isOpen, onClose }) {
                                     🟢 Totalmente Pagado
                                 </div>
                                 <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: 0 }}>
-                                    Factura completamente saldada. <strong>Saldo Pendiente = 0.00 €</strong>.
+                                    Factura completamente saldada. <strong>Residual = 0.00 €</strong>.
+                                    No aparece en la vista de Pendientes.
                                 </p>
                             </div>
 
@@ -382,7 +401,8 @@ function HelpModal({ isOpen, onClose }) {
                                     🟢 Justificado
                                 </div>
                                 <p style={{ fontSize: '0.85rem', color: '#cbd5e1', margin: 0 }}>
-                                    Pago sin factura que ha sido <strong>justificado manualmente</strong> (ej: pago anticipado, factura de otro periodo).
+                                    Pago sin factura con <strong>justificación documentada</strong>. Opciones: Factura de otro trimestre,
+                                    Pago anticipado, Nota de crédito, Otro.
                                 </p>
                             </div>
                         </div>
@@ -396,18 +416,48 @@ function HelpModal({ isOpen, onClose }) {
                         padding: '1.5rem'
                     }}>
                         <h3 style={{ fontSize: '1.1rem', fontWeight: '600', margin: '0 0 1rem 0', color: '#a78bfa' }}>
-                            💡 Consejos Profesionales
+                            💡 Flujo de Trabajo Recomendado
                         </h3>
-                        <ul style={{ margin: 0, paddingLeft: '1.5rem', color: '#cbd5e1', fontSize: '0.9rem', lineHeight: '1.8' }}>
-                            <li>Configure la <strong>tolerancia</strong> según sus necesidades (típicamente 0.01 € para evitar diferencias de redondeo)</li>
-                            <li>Los métodos <strong>Reference</strong> y <strong>Exact</strong> requieren disciplina contable pero ofrecen mayor precisión</li>
-                            <li><strong>Justifique</strong> siempre los pagos sin factura para mantener un registro limpio</li>
-                            <li>Revise regularmente la sección <strong>Pendientes</strong> para detectar facturas sin cobrar</li>
-                            <li>Use prefijos de cuenta consistentes (ej: 43* para clientes, 40* para proveedores)</li>
-                        </ul>
+                        <ol style={{ margin: 0, paddingLeft: '1.5rem', color: '#cbd5e1', fontSize: '0.9rem', lineHeight: '1.8' }}>
+                            <li><strong>Seleccione el archivo Excel</strong> con su contabilidad (arrastrando o haciendo clic)</li>
+                            <li><strong>Configure parámetros</strong> si es necesario:
+                                <ul style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <li>Tolerancia: 0.01 € (recomendado para evitar diferencias de redondeo)</li>
+                                    <li>Prefijos de cuenta: 43 para Clientes (AR), 40 para Proveedores (AP)</li>
+                                </ul>
+                            </li>
+                            <li><strong>Ejecute</strong> el análisis y revise el resumen inicial (totales, pendientes)</li>
+                            <li><strong>Navegue por Clientes/Proveedores</strong> según lo que necesite analizar</li>
+                            <li><strong>Revise Emparejados</strong>:
+                                <ul style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <li>Expanda cada tercero para ver detalles de facturas y pagos</li>
+                                    <li>Use filtros para revisar métodos específicos (Reference, Exact, FIFO)</li>
+                                    <li><strong>Justifique pagos sin factura</strong> (en rojo) con el selector desplegable</li>
+                                </ul>
+                            </li>
+                            <li><strong>Revise Pendientes</strong>:
+                                <ul style={{ marginTop: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <li>Priorice por días pendientes (las más antiguas primero)</li>
+                                    <li>Gestione cobros/pagos o identifique facturas problemáticas</li>
+                                </ul>
+                            </li>
+                            <li><strong>Descargue el Excel</strong> con el resultado detallado para auditoría o archivo</li>
+                        </ol>
+
+                        <div style={{
+                            marginTop: '1.5rem',
+                            padding: '1rem',
+                            background: 'rgba(245, 158, 11, 0.1)',
+                            borderRadius: '0.5rem',
+                            fontSize: '0.85rem',
+                            color: '#fbbf24',
+                            borderLeft: '3px solid #fbbf24'
+                        }}>
+                            <strong>⚠️ Importante:</strong> La barra lateral se puede ocultar/mostrar con el botón circular para maximizar
+                            el espacio de visualización de datos.
+                        </div>
                     </div>
                 </div>
-            </div>
         </div>
     );
 }

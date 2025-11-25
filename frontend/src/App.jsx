@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 import { conciliateFile } from './api';
 import HelpModal from './HelpModal';
 
@@ -21,6 +21,9 @@ function App() {
 
   // Help modal
   const [showHelp, setShowHelp] = useState(false);
+
+  // Sidebar toggle
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -130,81 +133,42 @@ function App() {
               ∑
             </div>
             <div>
-              <h1 style={{ fontSize: '22px', fontWeight: '700', letterSpacing: '-0.03em', margin: 0 }}>Conciliador</h1>
-              <p style={{ fontSize: '13px', color: 'var(--color-label-secondary)', margin: 0 }}>
-                {result?.company_name || 'Assessoria Egara'}
-                {result?.period && (
-                  <span style={{ marginLeft: '0.5rem', color: 'var(--color-accent-blue)', fontWeight: '600' }}>
-                    • {result.period}
-                  </span>
+              <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.03em', margin: 0, display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <span>Conciliador</span>
+                {result?.company_name && (
+                  <>
+                    <span style={{ fontSize: '24px', color: 'var(--color-label-secondary)', fontWeight: '400' }}>/</span>
+                    <span style={{ fontSize: '20px', color: 'var(--color-label-primary)' }}>
+                      {result.company_name}
+                    </span>
+                    {result?.period && (
+                      <span style={{ fontSize: '18px', color: 'var(--color-accent-blue)', fontWeight: '600' }}>
+                        • {result.period}
+                      </span>
+                    )}
+                  </>
                 )}
-              </p>
+              </h1>
             </div>
           </div>
         </div>
       </div>
 
-      <main style={{ display: 'flex', minHeight: 'calc(100vh - 84px)' }}>
+      <main style={{ display: 'flex', minHeight: 'calc(100vh - 84px)', position: 'relative' }}>
         {/* Left Sidebar - Apple Style */}
         <aside style={{
-          width: '320px',
-          minWidth: '320px',
+          width: sidebarCollapsed ? '0px' : '320px',
+          minWidth: sidebarCollapsed ? '0px' : '320px',
           background: 'var(--color-bg-secondary)',
           borderRight: '1px solid var(--color-separator)',
-          padding: 'var(--spacing-6)',
+          padding: sidebarCollapsed ? '0' : 'var(--spacing-6)',
           overflowY: 'auto',
           display: 'flex',
           flexDirection: 'column',
-          gap: 'var(--spacing-6)'
+          gap: 'var(--spacing-6)',
+          transition: 'all 0.3s ease-in-out',
+          overflow: sidebarCollapsed ? 'hidden' : 'auto'
         }}>
-
-          {/* Settings Panel */}
-          <div className="card" style={{
-            padding: 'var(--spacing-5)'
-          }}>
-            <h3 style={{
-              fontSize: '15px',
-              fontWeight: '600',
-              marginBottom: 'var(--spacing-4)',
-              color: 'var(--color-label-primary)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em'
-            }}>
-              Configuración
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
-              <div>
-                <label style={{
-                  fontSize: '13px',
-                  marginBottom: 'var(--spacing-2)',
-                  display: 'block',
-                  color: 'var(--color-label-secondary)',
-                  fontWeight: '500'
-                }}>Tolerancia (€)</label>
-                <input type="number" step="0.01" value={tol} onChange={(e) => setTol(parseFloat(e.target.value))} />
-              </div>
-              <div>
-                <label style={{
-                  fontSize: '13px',
-                  marginBottom: 'var(--spacing-2)',
-                  display: 'block',
-                  color: 'var(--color-label-secondary)',
-                  fontWeight: '500'
-                }}>Prefijo Clientes (AR)</label>
-                <input type="text" value={arPrefix} onChange={(e) => setArPrefix(e.target.value)} />
-              </div>
-              <div>
-                <label style={{
-                  fontSize: '13px',
-                  marginBottom: 'var(--spacing-2)',
-                  display: 'block',
-                  color: 'var(--color-label-secondary)',
-                  fontWeight: '500'
-                }}>Prefijo Proveedores (AP)</label>
-                <input type="text" value={apPrefix} onChange={(e) => setApPrefix(e.target.value)} />
-              </div>
-            </div>
-          </div>
 
           {/* File Upload - Apple Style */}
           {!result && (
@@ -256,6 +220,71 @@ function App() {
               )}
             </div>
           )}
+
+          {/* Settings Panel - Collapsible */}
+          <div className="card" style={{
+            padding: 'var(--spacing-5)'
+          }}>
+            <div
+              onClick={() => setShowSettings(!showSettings)}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                cursor: 'pointer',
+                marginBottom: showSettings ? 'var(--spacing-4)' : '0'
+              }}
+            >
+              <h3 style={{
+                fontSize: '15px',
+                fontWeight: '600',
+                color: 'var(--color-label-primary)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                margin: 0
+              }}>
+                Configuración
+              </h3>
+              <Settings size={18} color="var(--color-label-secondary)" style={{
+                transform: showSettings ? 'rotate(90deg)' : 'rotate(0deg)',
+                transition: 'transform 0.3s ease'
+              }} />
+            </div>
+            {showSettings && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-4)' }}>
+                <div>
+                  <label style={{
+                    fontSize: '13px',
+                    marginBottom: 'var(--spacing-2)',
+                    display: 'block',
+                    color: 'var(--color-label-secondary)',
+                    fontWeight: '500'
+                  }}>Tolerancia (€)</label>
+                  <input type="number" step="0.01" value={tol} onChange={(e) => setTol(parseFloat(e.target.value))} />
+                </div>
+                <div>
+                  <label style={{
+                    fontSize: '13px',
+                    marginBottom: 'var(--spacing-2)',
+                    display: 'block',
+                    color: 'var(--color-label-secondary)',
+                    fontWeight: '500'
+                  }}>Prefijo Clientes (AR)</label>
+                  <input type="text" value={arPrefix} onChange={(e) => setArPrefix(e.target.value)} />
+                </div>
+                <div>
+                  <label style={{
+                    fontSize: '13px',
+                    marginBottom: 'var(--spacing-2)',
+                    display: 'block',
+                    color: 'var(--color-label-secondary)',
+                    fontWeight: '500'
+                  }}>Prefijo Proveedores (AP)</label>
+                  <input type="text" value={apPrefix} onChange={(e) => setApPrefix(e.target.value)} />
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Action Button - Apple Style */}
           {!result && (
@@ -310,60 +339,110 @@ function App() {
               <button className="btn btn-secondary" onClick={() => { setResult(null); setFile(null); }} style={{ width: '100%', padding: 'var(--spacing-3)', fontSize: '14px' }}>
                 Nuevo Archivo
               </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowHelp(true)}
+                style={{
+                  width: '100%',
+                  padding: 'var(--spacing-3)',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <HelpCircle size={16} />
+                Cómo Funciona
+              </button>
             </div>
           )}
 
-          {/* Help Button - Always visible */}
-          <div style={{ marginTop: 'auto', paddingTop: 'var(--spacing-4)' }}>
-            <button
-              className="btn btn-secondary"
-              onClick={() => setShowHelp(true)}
-              style={{
-                width: '100%',
-                padding: 'var(--spacing-3)',
-                fontSize: '14px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem'
-              }}
-            >
-              <HelpCircle size={16} />
-              Cómo Funciona
-            </button>
-          </div>
+          {/* Help Button - When no result */}
+          {!result && (
+            <div style={{ marginTop: 'auto', paddingTop: 'var(--spacing-4)' }}>
+              <button
+                className="btn btn-secondary"
+                onClick={() => setShowHelp(true)}
+                style={{
+                  width: '100%',
+                  padding: 'var(--spacing-3)',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                <HelpCircle size={16} />
+                Cómo Funciona
+              </button>
+            </div>
+          )}
         </aside>
+
+        {/* Toggle Button */}
+        <button
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          style={{
+            position: 'absolute',
+            left: sidebarCollapsed ? '0' : '320px',
+            top: '20px',
+            zIndex: 1001,
+            width: '32px',
+            height: '32px',
+            borderRadius: '50%',
+            background: 'var(--color-bg-elevated)',
+            border: '1px solid var(--color-separator)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            transition: 'all 0.3s ease-in-out',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            color: 'var(--color-label-primary)'
+          }}
+        >
+          {sidebarCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+        </button>
 
         {/* Main Content Area - Apple Style */}
         <div style={{ flex: 1, padding: 'var(--spacing-8)', overflowY: 'auto', background: 'var(--color-bg-primary)' }}>
 
+          {/* Help View */}
+          {showHelp && (
+            <div className="animate-fade-in">
+              <HelpModal isOpen={true} onClose={() => setShowHelp(false)} />
+            </div>
+          )}
+
           {/* Results View */}
-          {result && (
+          {result && !showHelp && (
             <div className="animate-fade-in">
               {/* Metrics Grid - Full Width Dashboard */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                {/* AR Metrics */}
+                {/* Clientes Metrics */}
                 <MetricCard
-                  title="AR Conciliado (Clientes)"
-                  value={`${result.summary.find(r => r.Bloque === 'AR')?.Asignado.toLocaleString()} €`}
+                  title="Clientes Conciliado"
+                  value={`${result.summary.find(r => r.Bloque === 'Clientes')?.Asignado.toLocaleString()} €`}
                   icon={TrendingUp}
                   color="var(--success)"
                 />
                 <MetricCard
-                  title="AR Pendientes (Clientes)"
-                  value={result.summary.find(r => r.Bloque === 'AR')?.Docs_pendientes}
+                  title="Clientes Pendientes"
+                  value={result.summary.find(r => r.Bloque === 'Clientes')?.Docs_pendientes}
                   icon={AlertTriangle}
                   color="var(--secondary)"
                 />
                 <MetricCard
-                  title="AP Conciliado (Proveedores)"
-                  value={`${result.summary.find(r => r.Bloque === 'AP')?.Asignado.toLocaleString()} €`}
+                  title="Proveedores Conciliado"
+                  value={`${result.summary.find(r => r.Bloque === 'Proveedores')?.Asignado.toLocaleString()} €`}
                   icon={TrendingUp}
                   color="var(--success)"
                 />
                 <MetricCard
-                  title="AP Pendientes (Proveedores)"
-                  value={result.summary.find(r => r.Bloque === 'AP')?.Docs_pendientes}
+                  title="Proveedores Pendientes"
+                  value={result.summary.find(r => r.Bloque === 'Proveedores')?.Docs_pendientes}
                   icon={AlertTriangle}
                   color="var(--secondary)"
                 />
@@ -390,7 +469,7 @@ function ReconciliationDetails({ details, justifications, setJustifications }) {
   const [activeBlock, setActiveBlock] = useState('AR'); // 'AR' | 'AP'
 
   const getMatches = () => {
-    const detailKey = activeBlock === 'AR' ? 'AR_Detalle' : 'AP_Detalle';
+    const detailKey = activeBlock === 'AR' ? 'Clientes_Detalle' : 'Proveedores_Detalle';
     const data = details[detailKey] || [];
 
     // Group by SetID
@@ -404,139 +483,127 @@ function ReconciliationDetails({ details, justifications, setJustifications }) {
   };
 
   const getPending = () => {
-    const pendingKey = activeBlock === 'AR' ? 'Pendientes_AR' : 'Pendientes_AP';
+    const pendingKey = activeBlock === 'AR' ? 'Pendientes_Clientes' : 'Pendientes_Proveedores';
     return details[pendingKey] || [];
   };
 
   return (
     <div style={{ marginTop: '3rem' }}>
-      {/* Controls - Separated Groups with Different Styles */}
+      {/* Compact tabs container */}
       <div style={{
+        background: 'rgba(0,0,0,0.2)',
+        borderRadius: '1rem',
+        padding: '0.75rem',
+        marginBottom: '1.5rem',
         display: 'flex',
-        gap: '3rem',
         alignItems: 'center',
-        justifyContent: 'center',
-        marginBottom: '2rem'
+        gap: '1rem',
+        flexWrap: 'wrap'
       }}>
-        {/* AR/AP Group - Tab Style */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <label style={{
-            fontSize: '11px',
-            fontWeight: '600',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'var(--color-label-secondary)',
-            textAlign: 'center'
-          }}>
-            Tipo de Cuenta
-          </label>
-          <div style={{
-            display: 'flex',
-            background: 'rgba(255,255,255,0.05)',
-            borderRadius: '10px',
-            padding: '4px',
-            border: '1px solid rgba(255,255,255,0.1)'
-          }}>
-            <button
-              onClick={() => setActiveBlock('AR')}
-              style={{
-                padding: '10px 28px',
-                borderRadius: '8px',
-                border: activeBlock === 'AR' ? '2px solid rgba(10, 132, 255, 0.6)' : '2px solid transparent',
-                background: activeBlock === 'AR' ? 'linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-purple) 100%)' : 'transparent',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: activeBlock === 'AR' ? '700' : '600',
-                fontSize: '14px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: activeBlock === 'AR' ? '0 4px 16px rgba(10, 132, 255, 0.4)' : 'none',
-                opacity: activeBlock === 'AR' ? 1 : 0.7
-              }}
-            >
-              Clientes
-            </button>
-            <button
-              onClick={() => setActiveBlock('AP')}
-              style={{
-                padding: '10px 28px',
-                borderRadius: '8px',
-                border: activeBlock === 'AP' ? '2px solid rgba(236, 72, 153, 0.6)' : '2px solid transparent',
-                background: activeBlock === 'AP' ? 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' : 'transparent',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: activeBlock === 'AP' ? '700' : '600',
-                fontSize: '14px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: activeBlock === 'AP' ? '0 4px 16px rgba(236, 72, 153, 0.4)' : 'none',
-                opacity: activeBlock === 'AP' ? 1 : 0.7
-              }}
-            >
-              Proveedores
-            </button>
-          </div>
+        {/* Main Tabs (Clientes / Proveedores) */}
+        <div style={{
+          display: 'inline-flex',
+          gap: '4px',
+          background: 'rgba(0,0,0,0.4)',
+          borderRadius: '8px',
+          padding: '3px',
+          border: '1px solid rgba(255,255,255,0.1)'
+        }}>
+          <button
+            onClick={() => setActiveBlock('AR')}
+            style={{
+              padding: '6px 20px',
+              borderRadius: '6px',
+              border: activeBlock === 'AR' ? '2px solid rgba(10, 132, 255, 0.6)' : '2px solid transparent',
+              background: activeBlock === 'AR' ? 'linear-gradient(135deg, var(--color-accent-blue) 0%, var(--color-accent-purple) 100%)' : 'transparent',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: activeBlock === 'AR' ? '700' : '600',
+              fontSize: '13px',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: activeBlock === 'AR' ? '0 4px 16px rgba(10, 132, 255, 0.4)' : 'none',
+              opacity: activeBlock === 'AR' ? 1 : 0.7
+            }}
+          >
+            Clientes
+          </button>
+          <button
+            onClick={() => setActiveBlock('AP')}
+            style={{
+              padding: '6px 20px',
+              borderRadius: '6px',
+              border: activeBlock === 'AP' ? '2px solid rgba(236, 72, 153, 0.6)' : '2px solid transparent',
+              background: activeBlock === 'AP' ? 'linear-gradient(135deg, #ec4899 0%, #f472b6 100%)' : 'transparent',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: activeBlock === 'AP' ? '700' : '600',
+              fontSize: '13px',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: activeBlock === 'AP' ? '0 4px 16px rgba(236, 72, 153, 0.4)' : 'none',
+              opacity: activeBlock === 'AP' ? 1 : 0.7
+            }}
+          >
+            Proveedores
+          </button>
         </div>
 
-        {/* Matches/Pending Group - Pill/Badge Style */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          <label style={{
-            fontSize: '11px',
-            fontWeight: '600',
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
-            color: 'var(--color-label-secondary)',
-            textAlign: 'center'
-          }}>
-            Estado
-          </label>
-          <div style={{ display: 'flex', gap: '0.75rem' }}>
-            <button
-              onClick={() => setActiveTab('matches')}
-              style={{
-                padding: '10px 24px',
-                borderRadius: '20px',
-                border: activeTab === 'matches' ? '2px solid #10b981' : '2px solid rgba(255,255,255,0.15)',
-                background: activeTab === 'matches' ? 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' : 'rgba(0,0,0,0.3)',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: '700',
-                fontSize: '13px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: activeTab === 'matches' ? '0 4px 16px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                opacity: activeTab === 'matches' ? 1 : 0.6
-              }}
-            >
-              ✓ Emparejados
-            </button>
-            <button
-              onClick={() => setActiveTab('pending')}
-              style={{
-                padding: '10px 24px',
-                borderRadius: '20px',
-                border: activeTab === 'pending' ? '2px solid #f59e0b' : '2px solid rgba(255,255,255,0.15)',
-                background: activeTab === 'pending' ? 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)' : 'rgba(0,0,0,0.3)',
-                color: 'white',
-                cursor: 'pointer',
-                fontWeight: '700',
-                fontSize: '13px',
-                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-                boxShadow: activeTab === 'pending' ? '0 4px 16px rgba(245, 158, 11, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
-                textTransform: 'uppercase',
-                letterSpacing: '0.05em',
-                opacity: activeTab === 'pending' ? 1 : 0.6
-              }}
-            >
-              ⧗ Pendientes
-            </button>
-          </div>
+        {/* Vertical divider */}
+        <div style={{ width: '1px', height: '24px', background: 'rgba(255,255,255,0.2)' }}></div>
+
+        {/* Sub-tabs */}
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={() => setActiveTab('matches')}
+            style={{
+              padding: '6px 16px',
+              borderRadius: '16px',
+              border: activeTab === 'matches' ? '2px solid #10b981' : '2px solid rgba(255,255,255,0.15)',
+              background: activeTab === 'matches' ? 'linear-gradient(135deg, #10b981 0%, #34d399 100%)' : 'rgba(0,0,0,0.3)',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: '700',
+              fontSize: '11px',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: activeTab === 'matches' ? '0 4px 16px rgba(16, 185, 129, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              opacity: activeTab === 'matches' ? 1 : 0.6
+            }}
+          >
+            ✓ Emparejados
+          </button>
+          <button
+            onClick={() => setActiveTab('pending')}
+            style={{
+              padding: '6px 16px',
+              borderRadius: '16px',
+              border: activeTab === 'pending' ? '2px solid #f59e0b' : '2px solid rgba(255,255,255,0.15)',
+              background: activeTab === 'pending' ? 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)' : 'rgba(0,0,0,0.3)',
+              color: 'white',
+              cursor: 'pointer',
+              fontWeight: '700',
+              fontSize: '11px',
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              boxShadow: activeTab === 'pending' ? '0 4px 16px rgba(245, 158, 11, 0.5), inset 0 1px 0 rgba(255,255,255,0.2)' : 'none',
+              textTransform: 'uppercase',
+              letterSpacing: '0.05em',
+              opacity: activeTab === 'pending' ? 1 : 0.6
+            }}
+          >
+            ⧗ Pendientes
+          </button>
         </div>
       </div>
 
-      {/* Content */}
+      {/* Content Container */}
       <div style={{ background: 'rgba(0,0,0,0.2)', borderRadius: '1rem', padding: '1.5rem', maxHeight: '600px', overflowY: 'auto' }}>
+
         {activeTab === 'matches' ? (
-          <MatchesList matches={getMatches()} justifications={justifications} setJustifications={setJustifications} />
+          <MatchesList
+            matches={getMatches()}
+            justifications={justifications}
+            setJustifications={setJustifications}
+          />
         ) : (
           <PendingList items={getPending()} />
         )}
@@ -611,15 +678,17 @@ function MatchesList({ matches, justifications, setJustifications }) {
       {/* Filter Controls */}
       <div style={{
         display: 'flex',
-        gap: '1rem',
+        alignItems: 'center',
+        gap: '1.5rem',
         marginBottom: '1.5rem',
         padding: '1rem',
         background: 'rgba(0,0,0,0.3)',
         borderRadius: '0.5rem',
         flexWrap: 'wrap'
       }}>
+        {/* Filters */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Método:</label>
+          <label style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Método:</label>
           <select
             value={filterMethod}
             onChange={(e) => setFilterMethod(e.target.value)}
@@ -629,7 +698,7 @@ function MatchesList({ matches, justifications, setJustifications }) {
               background: 'rgba(255,255,255,0.1)',
               color: 'white',
               border: '1px solid rgba(255,255,255,0.2)',
-              fontSize: '0.8rem'
+              fontSize: '0.75rem'
             }}
           >
             <option value="all">Todos</option>
@@ -648,12 +717,12 @@ function MatchesList({ matches, justifications, setJustifications }) {
             checked={showOnlyUnjustified}
             onChange={(e) => setShowOnlyUnjustified(e.target.checked)}
           />
-          <label htmlFor="showUnjustified" style={{ fontSize: '0.8rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
+          <label htmlFor="showUnjustified" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer' }}>
             Solo sin justificar
           </label>
         </div>
 
-        <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+        <div style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
           Mostrando {filteredMatches.length} de {matches.length} grupos
         </div>
       </div>
@@ -775,14 +844,14 @@ function MatchesList({ matches, justifications, setJustifications }) {
                     background: 'rgba(59, 130, 246, 0.15)',
                     padding: '2px 8px',
                     borderRadius: '4px'
-                  }}>{numInvoices} Fact.</span>
+                  }}>{numInvoices} Facturas</span>
                   <span style={{
                     color: '#EC4899',
                     fontWeight: '700',
                     background: 'rgba(236, 72, 153, 0.15)',
                     padding: '2px 8px',
                     borderRadius: '4px'
-                  }}>{numPayments} Pag.</span>
+                  }}>{numPayments} Pagos</span>
                 </div>
               </div>
             </div>
