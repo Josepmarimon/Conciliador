@@ -58,6 +58,8 @@ async def conciliate_endpoint(
             "summary": response_data["summary"],
             "meta": response_data["meta"],
             "details": response_data.get("details", {}),
+            "company_name": response_data.get("company_name"),
+            "period": response_data.get("period"),
             "filename": file.filename.replace(".xlsx", "_conciliado.xlsx"),
             "file_b64": b64_file
         }
