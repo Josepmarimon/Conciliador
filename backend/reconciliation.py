@@ -88,7 +88,16 @@ def extract_company_name(df_head: pd.DataFrame, header_row: int) -> Optional[str
         # Get non-empty cells
         non_empty = [str(val).strip() for val in row.values if pd.notna(val) and str(val).strip()]
         
-        # Look for potential company names (longer strings, not numbers, not common header keywords)
+        # Look for patterns like "Empresa: COMPANY NAME" or "Company: NAME"
+        for val in non_empty:
+            # Check for explicit company patterns
+            empresa_match = re.search(r'(?:Empresa|Company|Razón Social|Razon Social|Cliente|Client):\s*(.+)', val, flags=re.IGNORECASE)
+            if empresa_match:
+                company_name = empresa_match.group(1).strip()
+                if company_name and len(company_name) > 2:
+                    return company_name
+        
+        # Fallback: look for potential company names (longer strings, not numbers, not common header keywords)
         for val in non_empty:
             # Skip if it looks like a header keyword or is too short
             if len(val) < 3 or len(val) > 100:
@@ -96,8 +105,11 @@ def extract_company_name(df_head: pd.DataFrame, header_row: int) -> Optional[str
             # Skip if it's mostly numbers
             if sum(c.isdigit() for c in val) > len(val) * 0.5:
                 continue
-            # Skip common non-company words
-            if re.search(r'fecha|date|cuenta|account|debe|haber|saldo|balance|total', val, flags=re.IGNORECASE):
+            # Skip common non-company words and patterns
+            if re.search(r'fecha|date|cuenta|account|debe|haber|saldo|balance|total|período|periodo|period', val, flags=re.IGNORECASE):
+                continue
+            # Skip if it starts with common prefixes that aren't company names
+            if re.match(r'^(de |from |to |a )', val, flags=re.IGNORECASE):
                 continue
             # This looks like a potential company name
             return val
