@@ -134,7 +134,8 @@ function App() {
             </div>
             <div>
               <h1 style={{ fontSize: '28px', fontWeight: '700', letterSpacing: '-0.03em', margin: 0, display: 'flex', alignItems: 'baseline', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <span>Conciliador</span>
+                <span>Conciliador Contable</span>
+                <span style={{ fontSize: '20px', color: 'var(--color-label-secondary)', fontWeight: '400' }}>Assessoria Egara</span>
                 {result?.company_name && (
                   <>
                     <span style={{ fontSize: '24px', color: 'var(--color-label-secondary)', fontWeight: '400' }}>/</span>
