@@ -40,6 +40,11 @@ async def conciliate_endpoint(
     try:
         contents = await file.read()
 
+        # Add debug logging
+        print(f"[DEBUG] Processing file: {file.filename}")
+        print(f"[DEBUG] File size: {len(contents)} bytes")
+        print(f"[DEBUG] Tolerance: {tol}, AR prefix: {ar_prefix}, AP prefix: {ap_prefix}")
+
         # Parse justifications if provided
         import json
         justifications_dict = None
@@ -50,6 +55,10 @@ async def conciliate_endpoint(
                 justifications_dict = None
 
         response_data, output_excel = process_excel(contents, tol, ar_prefix, ap_prefix, justifications_dict)
+
+        print(f"[DEBUG] Company name extracted: {response_data.get('company_name')}")
+        print(f"[DEBUG] Period extracted: {response_data.get('period')}")
+        print(f"[DEBUG] Summary keys: {list(response_data.get('summary', {}).keys()) if 'summary' in response_data else 'No summary'}")
         
         import base64
         b64_file = base64.b64encode(output_excel.getvalue()).decode()
