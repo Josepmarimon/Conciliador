@@ -33,7 +33,7 @@ def find_header_row(df_head: pd.DataFrame) -> int:
     max_score = 0
     keywords = [r"fecha", r"date", r"cuenta", r"account", r"debe", r"debit", r"haber", r"credit", r"saldo", r"balance"]
 
-    print(f"[DEBUG] Searching for header row in first 30 rows...")
+    # print(f"[DEBUG] Searching for header row in first 30 rows...")
 
     for idx, row in df_head.iterrows():
         row_str = " ".join([str(x).lower() for x in row.values])
@@ -41,21 +41,21 @@ def find_header_row(df_head: pd.DataFrame) -> int:
         for kw in keywords:
             if re.search(kw, row_str):
                 score += 1
-        if score > 0:
-            print(f"[DEBUG] Row {idx} score: {score} - Contains: {row_str[:100]}...")
+        # if score > 0:
+        #     print(f"[DEBUG] Row {idx} score: {score} - Contains: {row_str[:100]}...")
         if score > max_score:
             max_score = score
             best_idx = idx
 
-    print(f"[DEBUG] Header row detected at index {best_idx} with score {max_score}")
+    # print(f"[DEBUG] Header row detected at index {best_idx} with score {max_score}")
 
     if max_score < 2:
-        print(f"[DEBUG] Warning: Low confidence header detection (score < 2), defaulting to row 0")
+        # print(f"[DEBUG] Warning: Low confidence header detection (score < 2), defaulting to row 0")
         return 0
     return best_idx
 
 def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
-    print(f"[DEBUG] Detecting schema from columns: {list(df.columns)[:10]}...")
+    # print(f"[DEBUG] Detecting schema from columns: {list(df.columns)[:10]}...")
     date_col   = find_col(df, [r"fecha", r"date", r"f\.?contab", r"asiento.*fecha"])
     cuenta_col = find_col(df, [r"cuenta", r"cta", r"account", r"cod.*cta"])
     debe_col   = find_col(df, [r"debe", r"cargo", r"debit"])
@@ -72,7 +72,7 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     
     # Fallback for headless sheets
     if not (schema["fecha"] and schema["cuenta"] and (schema["debe"] or schema["haber"])):
-        print(f"[DEBUG] Schema detection failed, using fallback. Detected schema: {schema}")
+        # print(f"[DEBUG] Schema detection failed, using fallback. Detected schema: {schema}")
         if len(df.columns) >= 9:
             cols = list(df.columns)
             schema = {
@@ -619,8 +619,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         meta_info["Filas_Clientes"] = counts.get("AR", 0)
         meta_info["Filas_Proveedores"] = counts.get("AP", 0)
 
-        print(f"[DEBUG] Processing sheet '{sheet_name}' with {len(df)} rows")
-        print(f"[DEBUG] AR rows: {counts.get('AR', 0)}, AP rows: {counts.get('AP', 0)}, Others: {counts.get('OTROS', 0)}")
+        # print(f"[DEBUG] Processing sheet '{sheet_name}' with {len(df)} rows")
+        # print(f"[DEBUG] AR rows: {counts.get('AR', 0)}, AP rows: {counts.get('AP', 0)}, Others: {counts.get('OTROS', 0)}")
 
         meta_rows.append(meta_info)
 
