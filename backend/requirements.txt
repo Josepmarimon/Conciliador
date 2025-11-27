@@ -1,3 +1,4 @@
+# Production dependencies for Conciliador backend
 fastapi
 uvicorn
 pandas
