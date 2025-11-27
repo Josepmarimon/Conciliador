@@ -3,6 +3,16 @@ import axios from 'axios';
 const API_URL = 'https://conciliador-awct.onrender.com'; // Production
 // const API_URL = 'http://localhost:8000'; // Local development
 
+export const getStats = async () => {
+    try {
+        const response = await axios.get(`${API_URL}/stats`);
+        return response.data;
+    } catch (error) {
+        console.error('Error fetching stats:', error);
+        return null;
+    }
+};
+
 export const conciliateFile = async (file, tol, arPrefix, apPrefix, justifications = {}) => {
     const formData = new FormData();
     formData.append('file', file);

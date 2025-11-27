@@ -4,6 +4,7 @@ from fastapi.responses import StreamingResponse
 import io
 import pandas as pd
 from reconciliation import process_excel
+from stats import increment_reconciliation_count, get_stats
 
 app = FastAPI(title="Conciliador FIFO API")
 
@@ -18,7 +19,16 @@ app.add_middleware(
 
 @app.get("/")
 def read_root():
-    return {"message": "Conciliador FIFO API is running"}
+    stats = get_stats()
+    return {
+        "message": "Conciliador FIFO API is running",
+        "total_reconciliations": stats["total_reconciliations"]
+    }
+
+@app.get("/stats")
+def get_statistics():
+    """Get usage statistics"""
+    return get_stats()
 
 from pydantic import BaseModel
 from typing import Dict, Optional
@@ -59,7 +69,16 @@ async def conciliate_endpoint(
         # print(f"[DEBUG] Company name extracted: {response_data.get('company_name')}")
         # print(f"[DEBUG] Period extracted: {response_data.get('period')}")
         # print(f"[DEBUG] Summary keys: {list(response_data.get('summary', {}).keys()) if 'summary' in response_data else 'No summary'}")
-        
+
+        # Count total rows processed
+        total_rows = 0
+        if "summary" in response_data:
+            for item in response_data["summary"]:
+                total_rows += item.get("Movimientos", 0)
+
+        # Increment statistics
+        stats = increment_reconciliation_count(total_rows)
+
         import base64
         b64_file = base64.b64encode(output_excel.getvalue()).decode()
         

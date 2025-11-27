@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { conciliateFile } from './api';
+import React, { useState, useEffect } from 'react';
+import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle, ChevronLeft, ChevronRight, Activity } from 'lucide-react';
+import { conciliateFile, getStats } from './api';
 import HelpModal from './HelpModal';
 
 function App() {
@@ -24,6 +24,18 @@ function App() {
 
   // Sidebar toggle
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  // Statistics
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    // Load statistics on mount
+    const loadStats = async () => {
+      const statsData = await getStats();
+      setStats(statsData);
+    };
+    loadStats();
+  }, [result]); // Reload stats after each reconciliation
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -219,6 +231,67 @@ function App() {
                   Listo
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Statistics Card */}
+          {stats && (
+            <div className="card" style={{
+              padding: 'var(--spacing-5)',
+              marginBottom: 'var(--spacing-4)',
+              background: 'linear-gradient(135deg, rgba(88, 86, 214, 0.05) 0%, rgba(32, 201, 151, 0.05) 100%)',
+              borderLeft: '3px solid var(--color-accent-blue)'
+            }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-2)',
+                marginBottom: 'var(--spacing-3)'
+              }}>
+                <Activity size={18} color="var(--color-accent-blue)" />
+                <h3 style={{
+                  fontSize: '15px',
+                  fontWeight: '600',
+                  color: 'var(--color-label-primary)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                  margin: 0
+                }}>
+                  Estadísticas de Uso
+                </h3>
+              </div>
+              <div style={{ fontSize: '14px', color: 'var(--color-label-secondary)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
+                  <span>Total conciliaciones:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--color-accent-blue)' }}>
+                    {stats.total_reconciliations || 0}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--spacing-2)' }}>
+                  <span>Archivos procesados:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--color-accent-green)' }}>
+                    {stats.total_files_processed || 0}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                  <span>Movimientos totales:</span>
+                  <span style={{ fontWeight: '600', color: 'var(--color-label-primary)' }}>
+                    {stats.total_rows_processed ? stats.total_rows_processed.toLocaleString('es-ES') : 0}
+                  </span>
+                </div>
+                {stats.last_reconciliation && (
+                  <div style={{
+                    marginTop: 'var(--spacing-3)',
+                    paddingTop: 'var(--spacing-3)',
+                    borderTop: '1px solid var(--color-separator)',
+                    fontSize: '12px'
+                  }}>
+                    <div>
+                      Última conciliación: {new Date(stats.last_reconciliation).toLocaleString('es-ES')}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

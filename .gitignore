@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+VENV/
+
+# Node
+node_modules/
+dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Application specific
+reconciliation_stats.json
+*.xlsx
+*.xls
+temp/
+output/
+
+# Environment variables
+.env
+.env.local
+.env.production
