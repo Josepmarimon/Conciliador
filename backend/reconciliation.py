@@ -550,6 +550,215 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
     
     return pend[["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"]]
 
+def translate_match_method(method: str) -> str:
+    """Translate match method to Spanish"""
+    translations = {
+        "Reference": "Referència",
+        "Exact": "Import exacte",
+        "FIFO": "FIFO",
+        "Open": "Pendent",
+        "Unallocated": "Sense factura",
+        "DateProximity": "Proximitat dates"
+    }
+    return translations.get(method, method)
+
+def get_row_status(row: pd.Series, tol: float) -> str:
+    """Determine the status of a reconciliation row for coloring"""
+    method = row.get("MatchMethod", "")
+    asignado = row.get("Asignado", 0)
+    residual = row.get("ResidualFacturaTras", 0)
+
+    # Red: Pending or unallocated payments
+    if method == "Open" or method == "Unallocated":
+        return "red"
+
+    # Orange: Partial payment (has allocation but residual remains)
+    if asignado > tol and residual > tol:
+        return "orange"
+
+    # Green: Fully reconciled
+    if asignado > tol and (pd.isna(residual) or residual <= tol):
+        return "green"
+
+    return "white"
+
+def get_punt_symbol(row: pd.Series, tol: float) -> str:
+    """Get the Punt. symbol based on reconciliation status"""
+    status = get_row_status(row, tol)
+    if status == "green":
+        return "✓"
+    elif status == "orange":
+        return "⚠"
+    elif status == "red":
+        return "✗"
+    return ""
+
+def build_cuentas_corrientes_sheet(det_df: pd.DataFrame, tol: float, tipo: str) -> pd.DataFrame:
+    """
+    Transform reconciliation detail DataFrame into original 'Cuentas corrientes' structure
+    with additional reconciliation columns.
+
+    Args:
+        det_df: Reconciliation detail DataFrame (Clientes_Detalle or Proveedores_Detalle)
+        tol: Tolerance for comparisons
+        tipo: "AR" or "AP" to determine account type
+
+    Returns:
+        DataFrame with original structure + reconciliation info
+    """
+    if det_df.empty:
+        return pd.DataFrame()
+
+    # Create working copy
+    df = det_df.copy()
+
+    # Translate match methods
+    df["Metodo"] = df["MatchMethod"].apply(translate_match_method)
+
+    # Add Punt. column
+    df["Punt."] = df.apply(lambda row: get_punt_symbol(row, tol), axis=1)
+
+    # Calculate Debe and Haber from original neto values
+    # For AR: Invoice (Haber), Payment (Debe)
+    # For AP: Invoice (Debe), Payment (Haber)
+    df["Debe"] = 0.0
+    df["Haber"] = 0.0
+
+    for idx, row in df.iterrows():
+        asignado = row.get("Asignado", 0)
+
+        if asignado > 0:  # Invoice allocation
+            if tipo == "AR":
+                df.at[idx, "Haber"] = asignado
+            else:  # AP
+                df.at[idx, "Debe"] = asignado
+        elif asignado < 0:  # Unallocated payment
+            if tipo == "AR":
+                df.at[idx, "Debe"] = -asignado
+            else:  # AP
+                df.at[idx, "Haber"] = -asignado
+        else:  # Open invoice
+            residual = row.get("ResidualFacturaTras", 0)
+            if residual > tol:
+                if tipo == "AR":
+                    df.at[idx, "Haber"] = residual
+                else:  # AP
+                    df.at[idx, "Debe"] = residual
+
+    # Calculate running Saldo (cumulative balance)
+    df = df.sort_values(["Cuenta_doc", "Fecha_pago"]).copy()
+
+    # Group by account and calculate running balance
+    df["Saldo"] = 0.0
+    for cuenta, group in df.groupby("Cuenta_doc", dropna=False):
+        group_sorted = group.sort_values(["Fecha_pago"])
+        if tipo == "AR":
+            # AR: Debe increases, Haber decreases
+            running = (group_sorted["Debe"] - group_sorted["Haber"]).cumsum()
+        else:  # AP
+            # AP: Haber increases, Debe decreases
+            running = (group_sorted["Haber"] - group_sorted["Debe"]).cumsum()
+        df.loc[group_sorted.index, "Saldo"] = running
+
+    # Prepare final columns with Spanish names
+    output_rows = []
+
+    # Group by account
+    for cuenta, group in df.groupby("Cuenta_doc", dropna=False):
+        # Get tercero (description) from first row
+        tercero = group["Tercero"].iloc[0] if not group.empty else ""
+        # Ensure tercero is a string, not a tuple or other type
+        if isinstance(tercero, (tuple, list)):
+            tercero = str(tercero[0]) if len(tercero) > 0 else ""
+        else:
+            tercero = str(tercero) if pd.notna(tercero) else ""
+
+        # Add account header row
+        header_row = {
+            "Cuenta": cuenta,
+            "Descripción": tercero,
+            "Punt.": "",
+            "Fecha": None,
+            "Concepto": "",
+            "Documento": "",
+            "Debe": None,
+            "Haber": None,
+            "Saldo": None,
+            "SetID": "",
+            "Método": "",
+            "Conciliat": None,
+            "Pendent": None,
+            "Confiança %": None,
+            "_row_type": "header",
+            "_status": "header"
+        }
+        output_rows.append(header_row)
+
+        # Add detail rows
+        for idx, row in group.iterrows():
+            # Determine which date to show (payment date preferred, fallback to doc date)
+            fecha = row["Fecha_pago"] if pd.notna(row["Fecha_pago"]) else row["Fecha_doc"]
+
+            # Get concepto from original data
+            concepto = row.get("Concepto_pago", "") if pd.notna(row.get("Concepto_pago")) else row.get("Concepto_doc", "")
+
+            # Get documento
+            documento = row.get("Documento_pago", "") if pd.notna(row.get("Documento_pago")) else row.get("Documento_doc", "")
+
+            detail_row = {
+                "Cuenta": "",  # Empty for detail rows
+                "Descripción": "",  # Empty for detail rows
+                "Punt.": row["Punt."],
+                "Fecha": fecha,
+                "Concepto": concepto,
+                "Documento": documento,
+                "Debe": row["Debe"] if row["Debe"] != 0 else None,
+                "Haber": row["Haber"] if row["Haber"] != 0 else None,
+                "Saldo": row["Saldo"],
+                "SetID": int(row["SetID"]) if pd.notna(row["SetID"]) else "",
+                "Método": row["Metodo"],
+                "Conciliat": row["Asignado"] if row["Asignado"] != 0 else None,
+                "Pendent": row["ResidualFacturaTras"] if pd.notna(row["ResidualFacturaTras"]) and row["ResidualFacturaTras"] > tol else None,
+                "Confiança %": f"{row['Confidence']:.0f}%" if pd.notna(row.get("Confidence")) and row.get("Confidence", 0) > 0 else "",
+                "_row_type": "detail",
+                "_status": get_row_status(row, tol)
+            }
+            output_rows.append(detail_row)
+
+        # Add total row for this account
+        total_debe = group["Debe"].sum()
+        total_haber = group["Haber"].sum()
+        final_saldo = group["Saldo"].iloc[-1] if not group.empty else 0
+
+        total_row = {
+            "Cuenta": "",
+            "Descripción": "",
+            "Punt.": "",
+            "Fecha": None,
+            "Concepto": "Total cuenta",
+            "Documento": "",
+            "Debe": total_debe if total_debe != 0 else None,
+            "Haber": total_haber if total_haber != 0 else None,
+            "Saldo": final_saldo,
+            "SetID": "",
+            "Método": "",
+            "Conciliat": None,
+            "Pendent": None,
+            "Confiança %": "",
+            "_row_type": "total",
+            "_status": "total"
+        }
+        output_rows.append(total_row)
+
+        # Add blank row
+        blank_row = {col: "" if col not in ["Debe", "Haber", "Saldo", "Conciliat", "Pendent"] else None
+                     for col in header_row.keys()}
+        blank_row["_row_type"] = "blank"
+        blank_row["_status"] = "blank"
+        output_rows.append(blank_row)
+
+    return pd.DataFrame(output_rows)
+
 def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict], Optional[str], Optional[str]]:
     xls = pd.ExcelFile(io.BytesIO(file_content))
 
@@ -683,7 +892,7 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
                 ap_rows.append(work)
 
     out_sheets = {}
-    
+
     # AR Processing
     det_ar = pd.DataFrame()
     if ar_rows:
@@ -692,6 +901,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         det_ar = reconcile_fifo(ar_all, tol=tol)
         out_sheets["Clientes_Detalle"] = det_ar
         out_sheets["Pendientes_Clientes"] = build_pendientes(det_ar, tol)
+        # Generate Cuentas corrientes style sheet for AR
+        out_sheets["Clientes_Cuentas_Corrientes"] = build_cuentas_corrientes_sheet(det_ar, tol, "AR")
 
     # AP Processing
     det_ap = pd.DataFrame()
@@ -701,6 +912,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         det_ap = reconcile_fifo(ap_all, tol=tol)
         out_sheets["Proveedores_Detalle"] = det_ap
         out_sheets["Pendientes_Proveedores"] = build_pendientes(det_ap, tol)
+        # Generate Cuentas corrientes style sheet for AP
+        out_sheets["Proveedores_Cuentas_Corrientes"] = build_cuentas_corrientes_sheet(det_ap, tol, "AP")
 
     # Summary
     def quick_summary(df: pd.DataFrame, name: str, pend_sheet: str) -> Dict:
@@ -737,6 +950,150 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
     
     return out_sheets, summary_list, company_name, period
 
+def write_excel_with_formatting(out_sheets: Dict[str, pd.DataFrame], company_name: Optional[str], period: Optional[str]) -> io.BytesIO:
+    """
+    Write Excel file with proper formatting and colors for Cuentas corrientes sheets
+    """
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+        workbook = writer.book
+
+        # Define color formats
+        green_format = workbook.add_format({
+            'bg_color': '#C6EFCE',
+            'font_color': '#006100'
+        })
+        orange_format = workbook.add_format({
+            'bg_color': '#FFEB9C',
+            'font_color': '#9C5700'
+        })
+        red_format = workbook.add_format({
+            'bg_color': '#FFC7CE',
+            'font_color': '#9C0006'
+        })
+        header_format = workbook.add_format({
+            'bg_color': '#D9E1F2',
+            'font_color': '#1F4E78',
+            'bold': True
+        })
+        total_format = workbook.add_format({
+            'bg_color': '#E7E6E6',
+            'bold': True
+        })
+        metadata_format = workbook.add_format({
+            'bold': True,
+            'font_size': 11
+        })
+
+        for sheet_name, df in out_sheets.items():
+            # Skip empty sheets
+            if df.empty:
+                continue
+
+            sheet_name_safe = sheet_name[:31]
+
+            # Check if this is a Cuentas corrientes sheet
+            if "Cuentas_Corrientes" in sheet_name:
+                # Write metadata header
+                worksheet = workbook.add_worksheet(sheet_name_safe)
+                writer.sheets[sheet_name_safe] = worksheet
+
+                current_row = 0
+
+                # Add title
+                worksheet.write(current_row, 0, "Cuentas corrientes conciliado.", metadata_format)
+                current_row += 2
+
+                # Add company name if available
+                if company_name:
+                    worksheet.write(current_row, 0, f"Empresa: {company_name}", metadata_format)
+                    current_row += 1
+
+                # Add period if available
+                if period:
+                    worksheet.write(current_row, 0, f"Período: {period}", metadata_format)
+                    current_row += 1
+
+                # Add date
+                from datetime import datetime
+                fecha_str = datetime.now().strftime("%d/%m/%Y")
+                worksheet.write(current_row, 0, f"Fecha: {fecha_str}", metadata_format)
+                current_row += 2
+
+                # Get columns (excluding internal columns)
+                display_columns = [col for col in df.columns if not col.startswith('_')]
+
+                # Write column headers
+                for col_num, col_name in enumerate(display_columns):
+                    worksheet.write(current_row, col_num, col_name, header_format)
+
+                current_row += 1
+                header_row_excel = current_row
+
+                # Write data rows with formatting
+                for idx, row in df.iterrows():
+                    status = row.get('_status', 'white')
+                    row_type = row.get('_row_type', 'detail')
+
+                    # Select format based on status
+                    if row_type == 'header':
+                        row_format = header_format
+                    elif row_type == 'total':
+                        row_format = total_format
+                    elif status == 'green':
+                        row_format = green_format
+                    elif status == 'orange':
+                        row_format = orange_format
+                    elif status == 'red':
+                        row_format = red_format
+                    else:
+                        row_format = None
+
+                    # Write each cell
+                    for col_num, col_name in enumerate(display_columns):
+                        value = row[col_name]
+
+                        # Handle different data types
+                        if pd.isna(value) or value == "":
+                            if row_format:
+                                worksheet.write_blank(current_row, col_num, None, row_format)
+                            else:
+                                worksheet.write_blank(current_row, col_num, None)
+                        elif isinstance(value, (int, float, np.integer, np.floating)):
+                            if row_format:
+                                worksheet.write_number(current_row, col_num, float(value), row_format)
+                            else:
+                                worksheet.write_number(current_row, col_num, float(value))
+                        elif isinstance(value, (pd.Timestamp, pd.DatetimeTZDtype)):
+                            date_format = workbook.add_format({'num_format': 'dd/mm/yyyy'})
+                            if row_format:
+                                date_format.set_bg_color(row_format.bg_color if hasattr(row_format, 'bg_color') else None)
+                            worksheet.write_datetime(current_row, col_num, value, date_format)
+                        else:
+                            if row_format:
+                                worksheet.write(current_row, col_num, str(value), row_format)
+                            else:
+                                worksheet.write(current_row, col_num, str(value))
+
+                    current_row += 1
+
+                # Auto-adjust column widths
+                for col_num, col_name in enumerate(display_columns):
+                    max_width = len(str(col_name)) + 2
+                    for row in df.itertuples():
+                        cell_value = getattr(row, col_name, "")
+                        if pd.notna(cell_value):
+                            max_width = max(max_width, len(str(cell_value)) + 2)
+                    worksheet.set_column(col_num, col_num, min(max_width, 50))
+
+            else:
+                # Regular sheet without special formatting
+                df.to_excel(writer, sheet_name=sheet_name_safe, index=False)
+
+    output.seek(0)
+    return output
+
 def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, justifications: Optional[Dict[str, str]] = None) -> Tuple[Dict, io.BytesIO]:
     out_sheets, summary_list, company_name, period = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
 
@@ -752,12 +1109,8 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
                     axis=1
                 )
 
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        for name, data in out_sheets.items():
-            data.to_excel(writer, sheet_name=name[:31], index=False)
-    
-    output.seek(0)
+    # Write Excel with formatting
+    output = write_excel_with_formatting(out_sheets, company_name, period)
     
     # Final robust sanitization for JSON
     # Final robust sanitization for JSON
