@@ -99,14 +99,69 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     return schema
 
 def extract_invoice_references(text: str) -> List[str]:
-    """Extract potential invoice references from text using common patterns"""
+    """Extract potential invoice references from text using common patterns, including ranges"""
     if not text:
         return []
 
     text = str(text).upper()
     references = []
 
-    # Common invoice patterns
+    # First, detect ranges of invoices (e.g., "Fact 1234-1236" or "Fra. 1000 a 1003")
+    range_patterns = [
+        r'(?:FACT|FRA|FAC|INV)?\.?\s*(\d+)\s*[-A]\s*(\d+)',  # Fact 1234-1236, Fra 1000 a 1003
+        r'(\d+)\s*[-/]\s*(\d+)(?:\s*Y\s*(\d+))?',           # 1234-1236 y 1238
+    ]
+
+    for pattern in range_patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            if len(match) >= 2:
+                start_num = match[0]
+                end_num = match[1]
+
+                # Extract numeric parts for range expansion
+                try:
+                    start = int(re.search(r'\d+', str(start_num)).group())
+                    end = int(re.search(r'\d+', str(end_num)).group())
+
+                    # If end is shorter, it might be abbreviated (1234-36 means 1234-1236)
+                    if len(str(end)) < len(str(start)):
+                        prefix = str(start)[:-len(str(end))]
+                        end = int(prefix + str(end))
+
+                    # Generate all numbers in range (limit to 10 to avoid excessive expansion)
+                    if 0 < (end - start) <= 10:
+                        for num in range(start, end + 1):
+                            references.append(str(num))
+                    else:
+                        # If range is too large, just add endpoints
+                        references.append(str(start))
+                        references.append(str(end))
+
+                    # Add third number if present (e.g., "1234-1236 y 1238")
+                    if len(match) > 2 and match[2]:
+                        references.append(str(match[2]))
+
+                except (ValueError, AttributeError):
+                    # If parsing fails, add as-is
+                    references.extend([str(m) for m in match if m])
+
+    # Detect multiple comma-separated references (e.g., "Fact 123, 456, 789")
+    multi_patterns = [
+        r'(?:FACT|FRA|FAC|INV)?\.?\s*((?:\d+\s*,\s*)+\d+)',  # Fact 123, 456, 789
+    ]
+
+    for pattern in multi_patterns:
+        matches = re.findall(pattern, text)
+        for match in matches:
+            # Split by comma and extract numbers
+            parts = match.split(',')
+            for part in parts:
+                num_match = re.search(r'\d+', part.strip())
+                if num_match:
+                    references.append(num_match.group())
+
+    # Common invoice patterns (existing)
     patterns = [
         r'A/(\d+)',                    # A/337748 (specific format from real data)
         r'INV[-/\s]?(\d+)',           # INV-123, INV/123, INV 123
@@ -356,7 +411,71 @@ class Reconciler:
                 self.open_invoices[best_match_idx]["remaining"] -= take
                 payment_left -= take
 
-        # --- Phase 3: Date Proximity Match (NEW) ---
+        # --- Phase 3: Combined Amount Match (Multiple Invoices) ---
+        # Try to find combinations of 2-3 invoices that sum to the payment amount
+        if payment_left > self.tol:
+            # Get all open invoices with their amounts
+            open_inv_indices = []
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] > self.tol:
+                    open_inv_indices.append((idx, inv["remaining"]))
+
+            # Try combinations of 2 invoices first
+            if len(open_inv_indices) >= 2:
+                for i in range(len(open_inv_indices)):
+                    for j in range(i + 1, len(open_inv_indices)):
+                        idx1, amount1 = open_inv_indices[i]
+                        idx2, amount2 = open_inv_indices[j]
+                        combined_amount = amount1 + amount2
+
+                        # Check if combination matches payment (within 1% tolerance)
+                        if abs(combined_amount - payment_left) <= max(self.tol, payment_left * 0.01):
+                            # Found a match! Process both invoices
+                            confidence = 85  # High confidence for exact combination
+
+                            # Match first invoice
+                            take1 = min(self.open_invoices[idx1]["remaining"], amount1)
+                            matches.append((idx1, take1, "CombinedAmount", confidence))
+                            self.open_invoices[idx1]["remaining"] -= take1
+                            payment_left -= take1
+
+                            # Match second invoice
+                            take2 = min(self.open_invoices[idx2]["remaining"], amount2)
+                            matches.append((idx2, take2, "CombinedAmount", confidence))
+                            self.open_invoices[idx2]["remaining"] -= take2
+                            payment_left -= take2
+                            break
+                    if payment_left <= self.tol:
+                        break
+
+            # Try combinations of 3 invoices if still unmatched
+            if payment_left > self.tol and len(open_inv_indices) >= 3:
+                for i in range(len(open_inv_indices)):
+                    for j in range(i + 1, len(open_inv_indices)):
+                        for k in range(j + 1, len(open_inv_indices)):
+                            idx1, amount1 = open_inv_indices[i]
+                            idx2, amount2 = open_inv_indices[j]
+                            idx3, amount3 = open_inv_indices[k]
+                            combined_amount = amount1 + amount2 + amount3
+
+                            # Check if combination matches payment
+                            if abs(combined_amount - payment_left) <= max(self.tol, payment_left * 0.01):
+                                confidence = 80  # Good confidence for 3-invoice combination
+
+                                # Match all three invoices
+                                for idx, amount in [(idx1, amount1), (idx2, amount2), (idx3, amount3)]:
+                                    if self.open_invoices[idx]["remaining"] > self.tol:
+                                        take = min(self.open_invoices[idx]["remaining"], amount)
+                                        matches.append((idx, take, "CombinedAmount", confidence))
+                                        self.open_invoices[idx]["remaining"] -= take
+                                        payment_left -= take
+                                break
+                        if payment_left <= self.tol:
+                            break
+                    if payment_left <= self.tol:
+                        break
+
+        # --- Phase 4: Date Proximity Match ---
         if payment_left > self.tol and payment_date and payment_date != pd.NaT:
             proximity_candidates = []
 
@@ -389,7 +508,7 @@ class Reconciler:
                     self.open_invoices[best_idx]["remaining"] -= take
                     payment_left -= take
 
-        # --- Phase 4: FIFO Fallback ---
+        # --- Phase 5: FIFO Fallback ---
         if payment_left > self.tol:
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
@@ -469,7 +588,8 @@ class Reconciler:
 
         # Handle Unallocated Payment
         if payment_left > self.tol:
-            self.out_rows.append({
+            # Generate suggestion for unmatched payment
+            unmatched_row = {
                 "SetID": self.set_id,
                 "Tercero": tercero,
                 "Fecha_doc": pd.NaT,
@@ -490,7 +610,21 @@ class Reconciler:
                 "Cuenta_pago": payment_row["cuenta"],
                 "Documento_pago": payment_row["doc"],
                 "Concepto_pago": payment_row["concepto"]
-            })
+            }
+
+            # Generate suggestion for why it wasn't matched
+            suggestion = generate_unmatched_suggestions(
+                pd.Series(unmatched_row),
+                self.open_invoices,
+                recent_history=None  # Could be enhanced with payment history
+            )
+
+            # Add suggestion to the row
+            unmatched_row["Suggestion"] = suggestion.get("message", "")
+            unmatched_row["SuggestedAction"] = suggestion.get("action", "")
+            unmatched_row["SuggestionConfidence"] = suggestion.get("confidence", 0)
+
+            self.out_rows.append(unmatched_row)
             
         # Check if set is closed (no open invoices and no running payment)
         # In this row-by-row logic, we check if we are "clean".
@@ -577,15 +711,133 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
     
     return pend[["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"]]
 
+def generate_unmatched_suggestions(payment_row: pd.Series, open_invoices: List[Dict], recent_history: List[Dict] = None) -> Dict[str, Any]:
+    """
+    Generate intelligent suggestions for why a payment wasn't matched and what to do about it.
+
+    Args:
+        payment_row: The unmatched payment row
+        open_invoices: List of currently open invoices for this tercero
+        recent_history: Recent payment patterns for this tercero (optional)
+
+    Returns:
+        Dictionary with suggestion type and details
+    """
+    suggestions = []
+    payment_amount = abs(float(payment_row.get("Asignado", 0)))
+    payment_date = payment_row.get("Fecha_pago")
+    payment_concept = str(payment_row.get("Concepto_pago", "")).lower()
+    tercero = payment_row.get("Tercero", "")
+
+    # Check if payment amount is very small (likely bank fees or rounding)
+    if payment_amount < 50:
+        suggestions.append({
+            "type": "small_amount",
+            "confidence": 90,
+            "message": f"Import petit ({payment_amount:.2f}€) - Possible comissió bancària o arrodoniment",
+            "action": "Classificar com a despesa bancària"
+        })
+
+    # Check for possible advance payment based on concept
+    advance_keywords = ["anticipo", "avance", "adelanto", "a cuenta", "provisió", "bestreta"]
+    if any(keyword in payment_concept for keyword in advance_keywords):
+        suggestions.append({
+            "type": "advance_payment",
+            "confidence": 85,
+            "message": "El concepte suggereix un pagament anticipat",
+            "action": "Marcar com a pagament a compte"
+        })
+
+    # Check if payment might be for future invoices
+    if open_invoices:
+        # Sort invoices by date
+        sorted_invoices = sorted(open_invoices, key=lambda x: x.get("fecha", pd.NaT))
+
+        # Check if payment amount is close to sum of upcoming invoices
+        upcoming_sum = sum(inv["remaining"] for inv in sorted_invoices[:3])
+        if abs(upcoming_sum - payment_amount) < payment_amount * 0.05:  # Within 5%
+            suggestions.append({
+                "type": "future_invoices",
+                "confidence": 75,
+                "message": f"Import similar a factures pendents futures ({upcoming_sum:.2f}€)",
+                "action": "Revisar factures del proper trimestre"
+            })
+
+    # Check for possible digit transposition errors
+    if open_invoices:
+        for inv in open_invoices:
+            inv_amount = inv.get("remaining", 0)
+            # Check if digits might be transposed (e.g., 123.45 vs 132.45)
+            amount_str = f"{payment_amount:.2f}".replace(".", "")
+            inv_str = f"{inv_amount:.2f}".replace(".", "")
+
+            if len(amount_str) == len(inv_str):
+                differences = sum(1 for a, b in zip(amount_str, inv_str) if a != b)
+                if differences == 2:  # Exactly two digits different (possible transposition)
+                    suggestions.append({
+                        "type": "digit_error",
+                        "confidence": 60,
+                        "message": f"Possible error de digitació - Similar a factura de {inv_amount:.2f}€",
+                        "action": "Verificar import amb el banc",
+                        "invoice_ref": inv.get("doc_key", "")
+                    })
+                    break
+
+    # Check payment patterns if history is provided
+    if recent_history and len(recent_history) >= 3:
+        # Calculate average payment amount for this tercero
+        avg_payment = sum(abs(p.get("amount", 0)) for p in recent_history) / len(recent_history)
+
+        # Check if this payment is unusual
+        if payment_amount > avg_payment * 2:
+            suggestions.append({
+                "type": "unusual_amount",
+                "confidence": 50,
+                "message": f"Import inusualment alt (mitjana: {avg_payment:.2f}€)",
+                "action": "Verificar si inclou múltiples períodes"
+            })
+        elif payment_amount < avg_payment * 0.5:
+            suggestions.append({
+                "type": "partial_payment",
+                "confidence": 65,
+                "message": f"Possible pagament parcial (mitjana: {avg_payment:.2f}€)",
+                "action": "Esperar resta del pagament"
+            })
+
+    # Check for credit note indicators
+    credit_keywords = ["abono", "devolución", "credit", "nota", "nc", "reembolso", "retorn"]
+    if any(keyword in payment_concept for keyword in credit_keywords):
+        suggestions.append({
+            "type": "credit_note",
+            "confidence": 80,
+            "message": "El concepte suggereix una nota de crèdit",
+            "action": "Buscar nota de crèdit corresponent"
+        })
+
+    # Sort suggestions by confidence
+    suggestions.sort(key=lambda x: x["confidence"], reverse=True)
+
+    # Return the best suggestion or a default one
+    if suggestions:
+        return suggestions[0]
+    else:
+        return {
+            "type": "unknown",
+            "confidence": 0,
+            "message": "No s'ha pogut determinar el motiu",
+            "action": "Revisar manualment amb documentació bancària"
+        }
+
 def translate_match_method(method: str) -> str:
     """Translate match method to Spanish"""
     translations = {
         "Reference": "Referència",
         "Exact": "Import exacte",
+        "CombinedAmount": "Import combinat",
+        "DateProximity": "Proximitat dates",
         "FIFO": "FIFO",
         "Open": "Pendent",
-        "Unallocated": "Sense factura",
-        "DateProximity": "Proximitat dates"
+        "Unallocated": "Sense factura"
     }
     return translations.get(method, method)
 
