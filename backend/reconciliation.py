@@ -396,8 +396,35 @@ class Reconciler:
                     continue
 
                 take = min(inv["remaining"], payment_left)
-                # Low confidence for FIFO matches
-                confidence = 50
+
+                # Calculate dynamic confidence for FIFO matches
+                confidence = 40  # Base confidence for FIFO
+
+                # Factor 1: Amount coverage ratio (does payment cover invoice well?)
+                if inv["remaining"] > 0:
+                    coverage_ratio = take / inv["remaining"]
+                    if 0.90 <= coverage_ratio <= 1.10:
+                        confidence += 10  # Payment covers 90-110% of invoice
+                    elif 0.80 <= coverage_ratio <= 1.20:
+                        confidence += 5   # Payment covers 80-120% of invoice
+
+                # Factor 2: Date proximity (is payment close to invoice date?)
+                if payment_date and payment_date != pd.NaT and inv["fecha"] and inv["fecha"] != pd.NaT:
+                    days_diff = (payment_date - inv["fecha"]).days
+                    if 0 <= days_diff <= 30:
+                        confidence += 15  # Within 30 days
+                    elif 0 <= days_diff <= 60:
+                        confidence += 10  # Within 60 days
+                    elif 0 <= days_diff <= 90:
+                        confidence += 5   # Within 90 days
+
+                # Factor 3: Position in queue (is this the first/oldest invoice?)
+                if idx == 0:
+                    confidence += 5  # First invoice in FIFO queue
+
+                # Cap confidence at reasonable max for FIFO
+                confidence = min(confidence, 70)
+
                 matches.append((idx, take, "FIFO", confidence))
                 inv["remaining"] -= take
                 payment_left -= take
