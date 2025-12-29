@@ -1175,6 +1175,310 @@ def build_cuentas_corrientes_sheet(det_df: pd.DataFrame, tol: float, tipo: str) 
 
     return pd.DataFrame(output_rows)
 
+
+def build_human_format_excel(
+    original_df: pd.DataFrame,
+    pending_ar: pd.DataFrame,
+    pending_ap: pd.DataFrame,
+    company_name: Optional[str],
+    period: Optional[str],
+    header_row_idx: int,
+    schema: Dict[str, Optional[str]]
+) -> List[Dict]:
+    """
+    Generate Excel output in EXACT human format - indistinguishable from manual reconciliation.
+
+    Shows ONLY pending items (identified by reconciliation) with the same structure as the original input:
+    - Single sheet "Cuentas corrientes"
+    - Same columns: Cuenta, Descripción, Punt., Fecha, Concepto, Documento, Debe, Haber, Saldo, Contrapartida
+    - Account headers, "Saldos anteriores", "Total cuenta" rows
+    - Grouped by account
+    """
+    from datetime import datetime
+
+    output_rows = []
+
+    # Collect all pending document numbers (only these should be in output)
+    pending_docs_ar = set()
+    pending_docs_ap = set()
+
+    if not pending_ar.empty:
+        for _, r in pending_ar.iterrows():
+            doc_key = str(r.get('DocKey', ''))
+            # Extract document number from DocKey (format: "tercero | doc | cuenta | amount")
+            parts = doc_key.split('|')
+            if len(parts) >= 2:
+                doc_num = parts[1].strip()
+                # Remove .0 suffix if present
+                if doc_num.endswith('.0'):
+                    doc_num = doc_num[:-2]
+                pending_docs_ar.add(doc_num)
+
+    if not pending_ap.empty:
+        for _, r in pending_ap.iterrows():
+            doc_key = str(r.get('DocKey', ''))
+            parts = doc_key.split('|')
+            if len(parts) >= 2:
+                doc_num = parts[1].strip()
+                if doc_num.endswith('.0'):
+                    doc_num = doc_num[:-2]
+                pending_docs_ap.add(doc_num)
+
+    # Get column names from schema
+    cuenta_col = schema.get('cuenta', 'Cuenta')
+    tercero_col = schema.get('tercero', 'Descripción')
+    punt_col = schema.get('punt', 'Punt.')
+    fecha_col = schema.get('fecha', 'Fecha')
+    concepto_col = schema.get('concepto', 'Concepto')
+    doc_col = schema.get('documento', 'Documento')
+    debe_col = schema.get('debe', 'Debe')
+    haber_col = schema.get('haber', 'Haber')
+    saldo_col = schema.get('saldo', 'Saldo')
+
+    # Group original data by account
+    current_account = None
+    current_tercero = None
+    account_movements = {}  # {(account, tercero): [movements]}
+
+    for idx, row in original_df.iterrows():
+        cuenta_val = row.get(cuenta_col)
+        tercero_val = row.get(tercero_col)
+        concepto_val = str(row.get(concepto_col, '')) if pd.notna(row.get(concepto_col)) else ''
+
+        # Skip special rows
+        if concepto_val in ['Saldos anteriores', 'Total cuenta']:
+            continue
+
+        # Check if this is an account header row (has account number)
+        if pd.notna(cuenta_val) and str(cuenta_val).strip():
+            current_account = str(cuenta_val).strip()
+            current_tercero = str(tercero_val).strip() if pd.notna(tercero_val) else ''
+            if (current_account, current_tercero) not in account_movements:
+                account_movements[(current_account, current_tercero)] = []
+        elif current_account and pd.notna(row.get(fecha_col)):
+            # This is a movement row - check if its document is in pending list
+            doc_val = row.get(doc_col)
+            doc_num = str(doc_val).strip() if pd.notna(doc_val) else ''
+            # Remove .0 suffix if present
+            if doc_num.endswith('.0'):
+                doc_num = doc_num[:-2]
+
+            # Check if this specific document is pending
+            is_pending = False
+            if current_account.startswith('43'):  # AR - Clients
+                is_pending = doc_num in pending_docs_ar
+            elif current_account.startswith('40'):  # AP - Suppliers
+                is_pending = doc_num in pending_docs_ap
+
+            if is_pending:
+                account_movements[(current_account, current_tercero)].append({
+                    'fecha': row.get(fecha_col),
+                    'concepto': row.get(concepto_col),
+                    'documento': row.get(doc_col),
+                    'debe': row.get(debe_col, 0) if pd.notna(row.get(debe_col)) else 0,
+                    'haber': row.get(haber_col, 0) if pd.notna(row.get(haber_col)) else 0,
+                })
+
+    # Build output rows for accounts with pending movements
+    first_account = True
+    for (account, tercero), movements in sorted(account_movements.items()):
+        if not movements:
+            continue
+
+        # Add blank row between accounts (and before first)
+        if not first_account:
+            output_rows.append({
+                'Cuenta': None, 'Descripción': None, 'Punt.': None, 'Fecha': None,
+                'Concepto': None, 'Documento': None, 'Debe': None, 'Haber': None,
+                'Saldo': None, 'Contrapartida': None, '_row_type': 'blank'
+            })
+        first_account = False
+
+        # Clean account number (remove .0 suffix)
+        clean_account = str(account)
+        if clean_account.endswith('.0'):
+            clean_account = clean_account[:-2]
+
+        # Account header row
+        output_rows.append({
+            'Cuenta': clean_account,
+            'Descripción': tercero,
+            'Punt.': None,
+            'Fecha': None,
+            'Concepto': None,
+            'Documento': None,
+            'Debe': None,
+            'Haber': None,
+            'Saldo': None,
+            'Contrapartida': None,
+            '_row_type': 'account_header'
+        })
+
+        # Saldos anteriores row
+        output_rows.append({
+            'Cuenta': None,
+            'Descripción': None,
+            'Punt.': None,
+            'Fecha': None,
+            'Concepto': 'Saldos anteriores',
+            'Documento': None,
+            'Debe': 0,
+            'Haber': 0,
+            'Saldo': 0,
+            'Contrapartida': None,
+            '_row_type': 'saldos_anteriores'
+        })
+
+        # Movement rows
+        running_saldo = 0
+        total_debe = 0
+        total_haber = 0
+
+        for mov in sorted(movements, key=lambda x: x['fecha'] if pd.notna(x['fecha']) else pd.Timestamp.min):
+            debe = float(mov['debe']) if mov['debe'] else 0
+            haber = float(mov['haber']) if mov['haber'] else 0
+            running_saldo += debe - haber
+            total_debe += debe
+            total_haber += haber
+
+            output_rows.append({
+                'Cuenta': None,
+                'Descripción': None,
+                'Punt.': None,  # Empty - not reconciled
+                'Fecha': mov['fecha'],
+                'Concepto': mov['concepto'],
+                'Documento': mov['documento'],
+                'Debe': debe if debe else 0,
+                'Haber': haber if haber else 0,
+                'Saldo': running_saldo,
+                'Contrapartida': None,
+                '_row_type': 'movement'
+            })
+
+        # Total cuenta row
+        output_rows.append({
+            'Cuenta': None,
+            'Descripción': None,
+            'Punt.': None,
+            'Fecha': None,
+            'Concepto': 'Total cuenta',
+            'Documento': None,
+            'Debe': total_debe if total_debe else 0,
+            'Haber': total_haber if total_haber else 0,
+            'Saldo': running_saldo,
+            'Contrapartida': None,
+            '_row_type': 'total'
+        })
+
+        # Note: blank row between accounts is added at the start of the next iteration
+
+    return output_rows
+
+
+def write_human_format_excel(
+    output_rows: List[Dict],
+    company_name: Optional[str],
+    period: Optional[str]
+) -> io.BytesIO:
+    """
+    Write the human-format Excel with exact same structure as manual reconciliation.
+    """
+    from datetime import datetime
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        workbook = writer.book
+        worksheet = workbook.add_worksheet('Cuentas corrientes')
+
+        # Formats
+        title_format = workbook.add_format({'bold': True, 'font_size': 14})
+        header_format = workbook.add_format({'bold': True, 'bg_color': '#D9E1F2', 'border': 1})
+        account_format = workbook.add_format({'bold': True, 'bg_color': '#E2EFDA'})
+        total_format = workbook.add_format({'bold': True, 'bg_color': '#FCE4D6'})
+        date_format = workbook.add_format({'num_format': 'dd/mm/yyyy'})
+        number_format = workbook.add_format({'num_format': '#,##0.00'})
+
+        # Title and metadata
+        worksheet.write(0, 0, 'Cuentas corrientes.', title_format)
+        worksheet.write(2, 0, f'Empresa: {company_name or ""}')
+        worksheet.write(3, 0, f'Período: {period or ""}')
+        worksheet.write(4, 0, f'Fecha: {datetime.now().strftime("%d/%m/%Y")}')
+
+        # Headers
+        headers = ['Cuenta', 'Descripción', 'Punt.', 'Fecha', 'Concepto', 'Documento',
+                   'Debe', 'Haber', 'Saldo', 'Contrapartida']
+        for col, header in enumerate(headers):
+            worksheet.write(6, col, header, header_format)
+
+        # Blank row after headers (row 7 is empty)
+        # Data rows start at row 8
+        row_num = 8
+        for data_row in output_rows:
+            row_type = data_row.get('_row_type', 'movement')
+
+            if row_type == 'blank':
+                row_num += 1
+                continue
+
+            # Determine format based on row type
+            if row_type == 'account_header':
+                fmt = account_format
+            elif row_type == 'total':
+                fmt = total_format
+            else:
+                fmt = None
+
+            # Write cells
+            worksheet.write(row_num, 0, data_row.get('Cuenta'), fmt)
+            worksheet.write(row_num, 1, data_row.get('Descripción'), fmt)
+            worksheet.write(row_num, 2, data_row.get('Punt.'), fmt)
+
+            fecha = data_row.get('Fecha')
+            if pd.notna(fecha) and fecha is not None:
+                worksheet.write(row_num, 3, fecha, date_format)
+            else:
+                worksheet.write(row_num, 3, None, fmt)
+
+            worksheet.write(row_num, 4, data_row.get('Concepto'), fmt)
+            worksheet.write(row_num, 5, data_row.get('Documento'), fmt)
+
+            # Numbers
+            debe = data_row.get('Debe')
+            haber = data_row.get('Haber')
+            saldo = data_row.get('Saldo')
+
+            if debe is not None and debe != 0:
+                worksheet.write(row_num, 6, debe, number_format)
+            else:
+                worksheet.write(row_num, 6, 0 if row_type in ['saldos_anteriores', 'total', 'movement'] else None)
+
+            if haber is not None and haber != 0:
+                worksheet.write(row_num, 7, haber, number_format)
+            else:
+                worksheet.write(row_num, 7, 0 if row_type in ['saldos_anteriores', 'total', 'movement'] else None)
+
+            if saldo is not None:
+                worksheet.write(row_num, 8, saldo, number_format)
+
+            worksheet.write(row_num, 9, data_row.get('Contrapartida'), fmt)
+
+            row_num += 1
+
+        # Set column widths
+        worksheet.set_column(0, 0, 12)   # Cuenta
+        worksheet.set_column(1, 1, 30)   # Descripción
+        worksheet.set_column(2, 2, 6)    # Punt.
+        worksheet.set_column(3, 3, 12)   # Fecha
+        worksheet.set_column(4, 4, 35)   # Concepto
+        worksheet.set_column(5, 5, 12)   # Documento
+        worksheet.set_column(6, 8, 12)   # Debe, Haber, Saldo
+        worksheet.set_column(9, 9, 15)   # Contrapartida
+
+    output.seek(0)
+    return output
+
+
 def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, sheet_filter: Optional[str] = None) -> Tuple[Dict[str, pd.DataFrame], List[Dict], Optional[str], Optional[str]]:
     xls = pd.ExcelFile(io.BytesIO(file_content))
 
