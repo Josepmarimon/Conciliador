@@ -1820,7 +1820,7 @@ def write_excel_with_formatting(out_sheets: Dict[str, pd.DataFrame], company_nam
     output.seek(0)
     return output
 
-def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, justifications: Optional[Dict[str, str]] = None) -> Tuple[Dict, io.BytesIO]:
+def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: str, justifications: Optional[Dict[str, str]] = None, output_format: str = "human") -> Tuple[Dict, io.BytesIO]:
     out_sheets, summary_list, company_name, period = generate_reconciliation_data(file_content, tol, ar_prefix, ap_prefix)
 
     # Add justifications to detail sheets if provided
@@ -1835,8 +1835,39 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
                     axis=1
                 )
 
-    # Write Excel with formatting
-    output = write_excel_with_formatting(out_sheets, company_name, period)
+    # Write Excel based on output format
+    if output_format == "human":
+        # Human format: single sheet identical to manual reconciliation
+        # Read original file to get structure
+        xls = pd.ExcelFile(io.BytesIO(file_content))
+        sheet_name = 'Cuentas corrientes' if 'Cuentas corrientes' in xls.sheet_names else xls.sheet_names[0]
+
+        # Read without header first to find header row
+        original_df_raw = pd.read_excel(xls, sheet_name=sheet_name, header=None)
+        header_row_idx = find_header_row(original_df_raw)
+
+        # Read with header
+        original_df = pd.read_excel(xls, sheet_name=sheet_name, header=header_row_idx)
+        schema = detect_schema(original_df)
+
+        # Get pending items
+        pending_ar = out_sheets.get('Pendientes_Clientes', pd.DataFrame())
+        pending_ap = out_sheets.get('Pendientes_Proveedores', pd.DataFrame())
+
+        # Build and write human format
+        output_rows = build_human_format_excel(
+            original_df=original_df,
+            pending_ar=pending_ar,
+            pending_ap=pending_ap,
+            company_name=company_name,
+            period=period,
+            header_row_idx=header_row_idx,
+            schema=schema
+        )
+        output = write_human_format_excel(output_rows, company_name, period)
+    else:
+        # Detailed format: multiple sheets with full reconciliation details
+        output = write_excel_with_formatting(out_sheets, company_name, period)
     
     # Final robust sanitization for JSON
     # Final robust sanitization for JSON

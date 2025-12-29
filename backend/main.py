@@ -42,7 +42,8 @@ async def conciliate_endpoint(
     tol: float = 0.01,
     ar_prefix: str = "43",
     ap_prefix: str = "40",
-    justifications: Optional[str] = None  # JSON string of justifications
+    justifications: Optional[str] = None,  # JSON string of justifications
+    output_format: str = "human"  # "human" (single tab like manual) or "detailed" (multi-tab)
 ):
     if not file.filename.endswith(".xlsx"):
         raise HTTPException(status_code=400, detail="Invalid file format. Please upload an Excel file (.xlsx).")
@@ -64,7 +65,7 @@ async def conciliate_endpoint(
             except:
                 justifications_dict = None
 
-        response_data, output_excel = process_excel(contents, tol, ar_prefix, ap_prefix, justifications_dict)
+        response_data, output_excel = process_excel(contents, tol, ar_prefix, ap_prefix, justifications_dict, output_format)
 
         # print(f"[DEBUG] Company name extracted: {response_data.get('company_name')}")
         # print(f"[DEBUG] Period extracted: {response_data.get('period')}")
