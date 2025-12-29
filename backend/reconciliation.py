@@ -75,12 +75,15 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
     tercero_col= find_col(df, [r"descripci[oó]n", r"descripc", r"proveedor", r"proveïdor", r"cliente", r"client", r"tercero", r"tercer", r"contrapartida", r"nombre", r"nom", r"raz[oó]n\s*social"])
     doc_col    = find_col(df, [r"factura", r"documento", r"document", r"n[ºo]\s*doc", r"n[úu]mero", r"número", r"ref"])
     concepto_col=find_col(df, [r"concepto", r"concepte", r"desc", r"glosa", r"detalle", r"detall", r"narr"])
-    
+    # Detect pre-reconciled column (Punt. / Punteado / Check / Reconciled)
+    punt_col   = find_col(df, [r"punt\.?$", r"punteado", r"puntejat", r"check", r"reconciled", r"conciliado", r"conciliat"])
+
     schema = {
         "fecha": date_col, "cuenta": cuenta_col, "debe": debe_col, "haber": haber_col,
-        "saldo": saldo_col, "tercero": tercero_col, "documento": doc_col, "concepto": concepto_col
+        "saldo": saldo_col, "tercero": tercero_col, "documento": doc_col, "concepto": concepto_col,
+        "punt": punt_col
     }
-    
+
     # Fallback for headless sheets
     if not (schema["fecha"] and schema["cuenta"] and (schema["debe"] or schema["haber"])):
         # print(f"[DEBUG] Schema detection failed, using fallback. Detected schema: {schema}")
@@ -89,6 +92,7 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
             schema = {
                 "cuenta": cols[0],
                 "tercero": cols[1],
+                "punt": cols[2] if len(cols) > 2 else None,  # Punt. is typically column 3
                 "fecha": cols[3],
                 "concepto": cols[4],
                 "documento": cols[5],
@@ -509,40 +513,51 @@ class Reconciler:
                     payment_left -= take
 
         # --- Phase 5: FIFO Fallback ---
+        # Enhanced FIFO: More aggressive matching for partial and split payments
         if payment_left > self.tol:
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
                     continue
 
+                # Allow partial payment allocation regardless of amount
                 take = min(inv["remaining"], payment_left)
 
                 # Calculate dynamic confidence for FIFO matches
-                confidence = 40  # Base confidence for FIFO
+                confidence = 45  # Base confidence for FIFO (increased from 40)
 
                 # Factor 1: Amount coverage ratio (does payment cover invoice well?)
                 if inv["remaining"] > 0:
                     coverage_ratio = take / inv["remaining"]
                     if 0.90 <= coverage_ratio <= 1.10:
-                        confidence += 10  # Payment covers 90-110% of invoice
+                        confidence += 15  # Payment covers 90-110% of invoice (increased)
                     elif 0.80 <= coverage_ratio <= 1.20:
-                        confidence += 5   # Payment covers 80-120% of invoice
+                        confidence += 10  # Payment covers 80-120% of invoice (increased)
+                    elif coverage_ratio >= 0.40:  # Accept partial payments down to 40%
+                        confidence += 5   # At least 40% coverage
 
-                # Factor 2: Date proximity (is payment close to invoice date?)
+                # Factor 2: Date proximity (more flexible for real-world delays)
                 if payment_date and payment_date != pd.NaT and inv["fecha"] and inv["fecha"] != pd.NaT:
                     days_diff = (payment_date - inv["fecha"]).days
-                    if 0 <= days_diff <= 30:
-                        confidence += 15  # Within 30 days
-                    elif 0 <= days_diff <= 60:
-                        confidence += 10  # Within 60 days
-                    elif 0 <= days_diff <= 90:
-                        confidence += 5   # Within 90 days
+                    if days_diff >= -30:  # Payment from 30 days before invoice
+                        if days_diff <= 45:
+                            confidence += 20  # Within 45 days (increased window)
+                        elif days_diff <= 75:
+                            confidence += 15  # Within 75 days (increased)
+                        elif days_diff <= 120:
+                            confidence += 10  # Within 120 days (increased)
+                        elif days_diff <= 180:
+                            confidence += 5   # Within 180 days
 
                 # Factor 3: Position in queue (is this the first/oldest invoice?)
                 if idx == 0:
                     confidence += 5  # First invoice in FIFO queue
 
+                # Factor 4: Boost for clean allocations
+                if abs(take - payment_left) < self.tol or abs(take - inv["remaining"]) < self.tol:
+                    confidence += 5  # Fully allocates payment or invoice
+
                 # Cap confidence at reasonable max for FIFO
-                confidence = min(confidence, 70)
+                confidence = min(confidence, 75)  # Increased cap
 
                 matches.append((idx, take, "FIFO", confidence))
                 inv["remaining"] -= take
@@ -664,22 +679,136 @@ class Reconciler:
 
 def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
     all_rows = []
-    
+
+    # Check if pre_reconciled column exists
+    has_pre_reconciled = "pre_reconciled" in df.columns
+
     # Work per tercero
     # Sort by date to ensure chronological processing
     for tercero, g in df.sort_values(["tercero", "fecha", "idx"]).groupby(["tercero"], dropna=False):
         reconciler = Reconciler(tol=tol)
-        
+        pre_reconciled_rows = []  # Store pre-reconciled movements separately
+
+        # Collect all movements for this tercero
+        invoices = []
+        payments = []
+
         for _, row in g.iterrows():
+            # Check if this movement is pre-reconciled
+            is_pre_reconciled = has_pre_reconciled and row.get("pre_reconciled", False)
+
+            amount = float(row["neto_norm"] or 0.0)
+            if is_pre_reconciled:
+                # Don't process pre-reconciled items - just record them
+                pre_reconciled_rows.append({
+                    "row": row,
+                    "amount": amount,
+                    "is_invoice": amount > 0
+                })
+            elif amount > 0:
+                invoices.append(row)
+            elif amount < 0:
+                payments.append(row)
+
+        # Process in chronological order but with awareness of future movements
+        # This helps with split payments and advance payments
+        all_movements = sorted(invoices + payments, key=lambda x: (x["fecha"], x["idx"]))
+
+        for row in all_movements:
             amount = float(row["neto_norm"] or 0.0)
             if amount > 0:
                 reconciler.add_invoice(row)
             elif amount < 0:
                 reconciler.process_payment(row, tercero)
-        
+
         reconciler.flush_remaining(tercero)
-        all_rows.extend(reconciler.out_rows)
-            
+
+        # Post-processing: Try to match unallocated payments with open invoices
+        # This handles cases where payments come before invoices
+        rows_df = pd.DataFrame(reconciler.out_rows)
+        if not rows_df.empty:
+            unallocated = rows_df[rows_df["MatchMethod"] == "Unallocated"]
+            open_invs = rows_df[rows_df["MatchMethod"] == "Open"]
+
+            if not unallocated.empty and not open_invs.empty:
+                # Try to match unallocated payments with open invoices
+                for _, payment in unallocated.iterrows():
+                    payment_amount = abs(payment["Asignado"])
+
+                    # Find best matching open invoice
+                    for _, invoice in open_invs.iterrows():
+                        invoice_amount = invoice["ResidualFacturaTras"]
+
+                        # Check if payment matches invoice (exact or partial)
+                        if abs(payment_amount - invoice_amount) < tol or payment_amount < invoice_amount:
+                            # Update the rows to show they're matched
+                            pay_idx = rows_df.index[rows_df["PagoKey"] == payment["PagoKey"]].tolist()
+                            inv_idx = rows_df.index[rows_df["DocKey"] == invoice["DocKey"]].tolist()
+
+                            if pay_idx and inv_idx:
+                                # Update match method for better tracking
+                                rows_df.loc[pay_idx[0], "MatchMethod"] = "PostProcessed"
+                                rows_df.loc[pay_idx[0], "Confidence"] = 60
+                                rows_df.loc[inv_idx[0], "MatchMethod"] = "PostProcessed"
+                                rows_df.loc[inv_idx[0], "Confidence"] = 60
+                                break
+
+            all_rows.extend(rows_df.to_dict('records'))
+        else:
+            all_rows.extend(reconciler.out_rows)
+
+        # Add pre-reconciled rows (they were already matched in previous periods)
+        # These don't participate in new reconciliation but are recorded for completeness
+        for pre_rec in pre_reconciled_rows:
+            row = pre_rec["row"]
+            amount = pre_rec["amount"]
+            is_invoice = pre_rec["is_invoice"]
+
+            if is_invoice:
+                # Pre-reconciled invoice
+                all_rows.append({
+                    "SetID": reconciler.set_id,
+                    "Tercero": tercero,
+                    "Fecha_doc": row["fecha"],
+                    "Fecha_pago": pd.NaT,
+                    "DocKey": row["doc_key"],
+                    "PagoKey": None,
+                    "Asignado": amount,  # Fully assigned (matched in previous period)
+                    "ResidualFacturaTras": 0.0,  # No residual
+                    "Hoja_doc": row.get("hoja", ""),
+                    "Hoja_pago": None,
+                    "MatchMethod": "PreReconciled",  # Special status for pre-reconciled
+                    "Confidence": 100,
+                    "Cuenta_doc": row.get("cuenta", ""),
+                    "Documento_doc": row.get("doc", ""),
+                    "Concepto_doc": row.get("concepto", ""),
+                    "Cuenta_pago": None,
+                    "Documento_pago": None,
+                    "Concepto_pago": None
+                })
+            else:
+                # Pre-reconciled payment
+                all_rows.append({
+                    "SetID": reconciler.set_id,
+                    "Tercero": tercero,
+                    "Fecha_doc": pd.NaT,
+                    "Fecha_pago": row["fecha"],
+                    "DocKey": None,
+                    "PagoKey": row["doc_key"],
+                    "Asignado": amount,  # Negative (payment already matched)
+                    "ResidualFacturaTras": None,
+                    "Hoja_doc": None,
+                    "Hoja_pago": row.get("hoja", ""),
+                    "MatchMethod": "PreReconciled",
+                    "Confidence": 100,
+                    "Cuenta_doc": None,
+                    "Documento_doc": None,
+                    "Concepto_doc": None,
+                    "Cuenta_pago": row.get("cuenta", ""),
+                    "Documento_pago": row.get("doc", ""),
+                    "Concepto_pago": row.get("concepto", "")
+                })
+
     return pd.DataFrame(all_rows)
 
 def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
@@ -837,7 +966,9 @@ def translate_match_method(method: str) -> str:
         "DateProximity": "Proximitat dates",
         "FIFO": "FIFO",
         "Open": "Pendent",
-        "Unallocated": "Sense factura"
+        "Unallocated": "Sense factura",
+        "PreReconciled": "Ja conciliat",
+        "PostProcessed": "Post-processat"
     }
     return translations.get(method, method)
 
@@ -846,6 +977,10 @@ def get_row_status(row: pd.Series, tol: float) -> str:
     method = row.get("MatchMethod", "")
     asignado = row.get("Asignado", 0)
     residual = row.get("ResidualFacturaTras", 0)
+
+    # Blue: Pre-reconciled (already matched in previous period)
+    if method == "PreReconciled":
+        return "blue"
 
     # Red: Pending or unallocated payments
     if method == "Open" or method == "Unallocated":
@@ -864,7 +999,9 @@ def get_row_status(row: pd.Series, tol: float) -> str:
 def get_punt_symbol(row: pd.Series, tol: float) -> str:
     """Get the Punt. symbol based on reconciliation status"""
     status = get_row_status(row, tol)
-    if status == "green":
+    if status == "blue":  # Pre-reconciled (from previous period)
+        return "Sí"  # Keep original marking
+    elif status == "green":
         return "✓"
     elif status == "orange":
         return "⚠"
@@ -1138,6 +1275,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         df["_doc"] = df[sch["documento"]] if sch["documento"] else np.nan
         df["_concepto"] = df[sch["concepto"]] if sch["concepto"] else np.nan
         df["_fecha"] = df[sch["fecha"]] if sch["fecha"] else pd.NaT
+        # Read the pre-reconciled column (Punt.) if available
+        df["_punt"] = df[sch["punt"]] if sch.get("punt") else np.nan
 
         for coll, sub in df[df["_collective"].isin(["AR","AP"])].copy().groupby("_collective"):
             sub = sub.reset_index(drop=True)
@@ -1146,6 +1285,9 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
                 net_norm = net # AR: Invoice > 0
             else:
                 net_norm = -net # AP: Invoice > 0 (usually Credit in accounting, so we invert)
+
+            # Check if movement is pre-reconciled (has "Sí" or similar in punt column)
+            pre_reconciled = sub["_punt"].astype(str).str.strip().str.lower().isin(["sí", "si", "yes", "x", "✓", "true", "1"])
 
             work = pd.DataFrame({
                 "hoja": sheet_name,
@@ -1156,6 +1298,7 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
                 "cuenta": sub[sch["cuenta"]].astype(str),
                 "neto": net,
                 "neto_norm": net_norm,
+                "pre_reconciled": pre_reconciled,
             })
             work["row_id"] = work.index.values
             work["doc_key"] = work.apply(
@@ -1164,7 +1307,7 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
             )
             if work["fecha"].isna().all():
                 work["fecha"] = pd.Timestamp("1900-01-01")
-            
+
             if coll == "AR":
                 ar_rows.append(work)
             else:
