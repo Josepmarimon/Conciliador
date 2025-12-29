@@ -1,73 +1,79 @@
 """
-Simple statistics module for tracking reconciliation usage
+Simple statistics module for tracking reconciliation usage.
+Uses CountAPI.xyz for persistent storage (free, no config needed).
 """
-import json
-import os
+import requests
 from datetime import datetime
 from typing import Dict, Any
 
-STATS_FILE = "reconciliation_stats.json"
+# CountAPI endpoints - persistent across deploys
+COUNTAPI_NAMESPACE = "conciliador-egara"
+COUNTAPI_KEY_TOTAL = "total-reconciliations"
+COUNTAPI_KEY_ROWS = "total-rows"
 
-def load_stats() -> Dict[str, Any]:
-    """Load statistics from JSON file"""
-    if os.path.exists(STATS_FILE):
-        try:
-            with open(STATS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            return initialize_stats()
-    return initialize_stats()
-
-def initialize_stats() -> Dict[str, Any]:
-    """Initialize empty statistics"""
-    return {
-        "total_reconciliations": 0,
-        "total_files_processed": 0,
-        "total_rows_processed": 0,
-        "last_reconciliation": None,
-        "first_reconciliation": None,
-        "daily_stats": {}
-    }
-
-def save_stats(stats: Dict[str, Any]) -> None:
-    """Save statistics to JSON file"""
+def _countapi_hit(key: str, amount: int = 1) -> int:
+    """Increment a CountAPI counter and return new value"""
     try:
-        with open(STATS_FILE, 'w') as f:
-            json.dump(stats, f, indent=2, default=str)
+        if amount == 1:
+            url = f"https://api.countapi.xyz/hit/{COUNTAPI_NAMESPACE}/{key}"
+        else:
+            url = f"https://api.countapi.xyz/update/{COUNTAPI_NAMESPACE}/{key}?amount={amount}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("value", 0)
     except Exception as e:
-        print(f"Warning: Could not save stats: {e}")
+        print(f"Warning: CountAPI error: {e}")
+    return 0
+
+def _countapi_get(key: str) -> int:
+    """Get current value from CountAPI"""
+    try:
+        url = f"https://api.countapi.xyz/get/{COUNTAPI_NAMESPACE}/{key}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("value", 0)
+    except Exception as e:
+        print(f"Warning: CountAPI error: {e}")
+    return 0
+
+def _countapi_create(key: str, initial_value: int = 0) -> bool:
+    """Create a CountAPI key if it doesn't exist"""
+    try:
+        url = f"https://api.countapi.xyz/create?namespace={COUNTAPI_NAMESPACE}&key={key}&value={initial_value}&enable_reset=0"
+        response = requests.get(url, timeout=5)
+        return response.status_code == 200
+    except:
+        return False
 
 def increment_reconciliation_count(rows_processed: int = 0) -> Dict[str, Any]:
     """Increment the reconciliation counter and update statistics"""
-    stats = load_stats()
+    # Increment total reconciliations
+    total = _countapi_hit(COUNTAPI_KEY_TOTAL)
 
-    # Update counters
-    stats["total_reconciliations"] += 1
-    stats["total_files_processed"] += 1
-    stats["total_rows_processed"] += rows_processed
+    # Increment total rows processed
+    if rows_processed > 0:
+        total_rows = _countapi_hit(COUNTAPI_KEY_ROWS, rows_processed)
+    else:
+        total_rows = _countapi_get(COUNTAPI_KEY_ROWS)
 
-    # Update timestamps
-    now = datetime.now().isoformat()
-    stats["last_reconciliation"] = now
-    if stats["first_reconciliation"] is None:
-        stats["first_reconciliation"] = now
-
-    # Update daily stats
-    today = datetime.now().strftime("%Y-%m-%d")
-    if today not in stats["daily_stats"]:
-        stats["daily_stats"][today] = {"count": 0, "rows": 0}
-    stats["daily_stats"][today]["count"] += 1
-    stats["daily_stats"][today]["rows"] += rows_processed
-
-    # Keep only last 30 days of daily stats
-    if len(stats["daily_stats"]) > 30:
-        dates = sorted(stats["daily_stats"].keys())
-        for old_date in dates[:-30]:
-            del stats["daily_stats"][old_date]
-
-    save_stats(stats)
-    return stats
+    return {
+        "total_reconciliations": total,
+        "total_rows_processed": total_rows,
+        "last_reconciliation": datetime.now().isoformat()
+    }
 
 def get_stats() -> Dict[str, Any]:
     """Get current statistics"""
-    return load_stats()
+    total = _countapi_get(COUNTAPI_KEY_TOTAL)
+    total_rows = _countapi_get(COUNTAPI_KEY_ROWS)
+
+    return {
+        "total_reconciliations": total,
+        "total_rows_processed": total_rows
+    }
+
+def initialize_counters():
+    """Initialize CountAPI counters (run once)"""
+    _countapi_create(COUNTAPI_KEY_TOTAL, 0)
+    _countapi_create(COUNTAPI_KEY_ROWS, 0)
+    print("CountAPI counters initialized")
