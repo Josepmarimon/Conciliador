@@ -1,9 +1,28 @@
 # Production dependencies for Conciliador backend
+
+# Web framework
 fastapi
-uvicorn
+uvicorn[standard]
+
+# Data processing
 pandas
 numpy
 openpyxl
 xlsxwriter
+
+# HTTP & File handling
 python-multipart
 requests
+
+# Database
+sqlalchemy[asyncio]>=2.0.0
+asyncpg
+alembic
+
+# Authentication
+python-jose[cryptography]
+passlib[bcrypt]
+
+# Configuration
+pydantic-settings
+python-dotenv

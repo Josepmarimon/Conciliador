@@ -1,13 +1,36 @@
 import React, { useState, useEffect } from 'react';
-import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle, ChevronLeft, ChevronRight, Activity } from 'lucide-react';
+import { Upload, FileSpreadsheet, Download, CheckCircle, AlertCircle, ArrowRight, Settings, TrendingUp, AlertTriangle, HelpCircle, ChevronLeft, ChevronRight, Activity, LogOut, User } from 'lucide-react';
 import { conciliateFile, getStats } from './api';
 import HelpModal from './HelpModal';
+import Login from './Login';
+import { useAuth } from './AuthContext';
 
 function App() {
+  const { user, loading: authLoading, logout, isAuthenticated } = useAuth();
+
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+
+  // Show login if not authenticated
+  if (authLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+      }}>
+        <div style={{ color: '#94a3b8', fontSize: '16px' }}>Carregant...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
 
   // Settings
   const [tol, setTol] = useState(0.01);
@@ -163,6 +186,62 @@ function App() {
                 )}
               </h1>
             </div>
+          </div>
+          {/* User Info and Logout */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--spacing-3)' }}>
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--spacing-2)',
+              padding: 'var(--spacing-2) var(--spacing-3)',
+              background: 'rgba(99, 102, 241, 0.1)',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid rgba(99, 102, 241, 0.2)',
+            }}>
+              <User size={16} color="var(--color-accent-blue)" />
+              <span style={{ fontSize: '13px', color: 'var(--color-label-primary)', fontWeight: '500' }}>
+                {user?.email}
+              </span>
+              {user?.role === 'admin' && (
+                <span style={{
+                  fontSize: '10px',
+                  fontWeight: '700',
+                  color: '#f59e0b',
+                  background: 'rgba(245, 158, 11, 0.15)',
+                  padding: '2px 6px',
+                  borderRadius: '4px',
+                  textTransform: 'uppercase',
+                }}>
+                  Admin
+                </span>
+              )}
+            </div>
+            <button
+              onClick={logout}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--spacing-2)',
+                padding: 'var(--spacing-2) var(--spacing-3)',
+                background: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.2)',
+                borderRadius: 'var(--radius-md)',
+                color: '#ef4444',
+                fontSize: '13px',
+                fontWeight: '500',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.background = 'rgba(239, 68, 68, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.background = 'rgba(239, 68, 68, 0.1)';
+              }}
+            >
+              <LogOut size={16} />
+              Sortir
+            </button>
           </div>
         </div>
       </div>
