@@ -1273,7 +1273,7 @@ def build_human_format_excel(
                 account_movements[(current_account, current_tercero)].append({
                     'fecha': row.get(fecha_col) if pd.notna(row.get(fecha_col)) else pd.Timestamp("1900-01-01"),
                     'concepto': 'Saldos anteriores',
-                    'documento': row.get(doc_col),
+                    'documento': None,
                     'debe': float(debe),
                     'haber': float(haber),
                     'is_saldo_anterior': True,
@@ -1437,7 +1437,7 @@ def write_human_format_excel(
 
     output = io.BytesIO()
 
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(output, engine='xlsxwriter', engine_kwargs={'options': {'nan_inf_to_errors': True}}) as writer:
         workbook = writer.book
         worksheet = workbook.add_worksheet('Cuentas corrientes')
 

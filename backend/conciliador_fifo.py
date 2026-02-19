@@ -25,11 +25,11 @@ def main():
     
     try:
         content = input_path.read_bytes()
-        out_sheets, summary = generate_reconciliation_data(
-            content, 
-            args.tol, 
-            args.ar_prefix, 
-            args.ap_prefix, 
+        out_sheets, summary, company_name, period = generate_reconciliation_data(
+            content,
+            args.tol,
+            args.ar_prefix,
+            args.ap_prefix,
             sheet_filter=args.sheet
         )
         
