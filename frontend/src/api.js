@@ -47,6 +47,9 @@ api.interceptors.request.use(
     (error) => Promise.reject(error)
 );
 
+// Singleton refresh promise to prevent concurrent refresh requests
+let refreshPromise = null;
+
 // Response interceptor - handle 401 and token refresh
 api.interceptors.response.use(
     (response) => response,
@@ -60,10 +63,16 @@ api.interceptors.response.use(
             const refreshToken = getRefreshToken();
             if (refreshToken) {
                 try {
-                    // Try to refresh the token
-                    const response = await axios.post(`${API_URL}/auth/refresh`, {
-                        refresh_token: refreshToken,
-                    });
+                    // Use singleton promise to avoid multiple simultaneous refreshes
+                    if (!refreshPromise) {
+                        refreshPromise = axios.post(`${API_URL}/auth/refresh`, {
+                            refresh_token: refreshToken,
+                        }).finally(() => {
+                            refreshPromise = null;
+                        });
+                    }
+
+                    const response = await refreshPromise;
 
                     const { access_token, refresh_token } = response.data;
                     const user = getStoredUser();
@@ -73,6 +82,7 @@ api.interceptors.response.use(
                     originalRequest.headers.Authorization = `Bearer ${access_token}`;
                     return api(originalRequest);
                 } catch (refreshError) {
+                    refreshPromise = null;
                     // Refresh failed - clear tokens and redirect to login
                     clearTokens();
                     window.location.href = '/';

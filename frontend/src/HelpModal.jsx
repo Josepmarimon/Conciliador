@@ -43,8 +43,8 @@ function HelpModal({ isOpen, onClose }) {
                         transition: 'all 0.2s ease',
                         color: 'white'
                     }}
-                    onMouseEnter={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.2)'}
-                    onMouseLeave={(e) => e.target.style.background = 'rgba(255, 255, 255, 0.1)'}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
                 >
                     <X size={20} />
                 </button>

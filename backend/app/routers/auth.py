@@ -182,8 +182,17 @@ async def change_password(
             detail="Current password is incorrect",
         )
 
+    # Re-fetch user from the active db session to avoid detached instance issues
+    result = await db.execute(select(User).where(User.id == current_user.id))
+    user = result.scalar_one_or_none()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
     # Update password
-    current_user.hashed_password = hash_password(request.new_password)
+    user.hashed_password = hash_password(request.new_password)
     await db.commit()
 
     return {"message": "Password updated successfully"}

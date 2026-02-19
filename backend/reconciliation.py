@@ -373,7 +373,7 @@ class Reconciler:
                         if score > max_score:
                             max_score = score
 
-                if max_score > 0.7:  # Threshold for considering a reference match
+                if max_score >= 0.7:  # Threshold for considering a reference match
                     best_ref_matches.append((idx, max_score))
 
             # Sort by score and process best matches first
@@ -451,6 +451,13 @@ class Reconciler:
                             break
                     if payment_left <= self.tol:
                         break
+
+            # Rebuild open_inv_indices after 2-combo matching (some may have been consumed)
+            if payment_left > self.tol:
+                open_inv_indices = []
+                for idx, inv in enumerate(self.open_invoices):
+                    if inv["remaining"] > self.tol:
+                        open_inv_indices.append((idx, inv["remaining"]))
 
             # Try combinations of 3 invoices if still unmatched
             if payment_left > self.tol and len(open_inv_indices) >= 3:
@@ -728,29 +735,35 @@ def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
         rows_df = pd.DataFrame(reconciler.out_rows)
         if not rows_df.empty:
             unallocated = rows_df[rows_df["MatchMethod"] == "Unallocated"]
-            open_invs = rows_df[rows_df["MatchMethod"] == "Open"]
 
-            if not unallocated.empty and not open_invs.empty:
-                # Try to match unallocated payments with open invoices
+            if not unallocated.empty:
                 for _, payment in unallocated.iterrows():
                     payment_amount = abs(payment["Asignado"])
+
+                    # Re-query open invoices each iteration to avoid stale data
+                    open_invs = rows_df[rows_df["MatchMethod"] == "Open"]
+                    if open_invs.empty:
+                        break
 
                     # Find best matching open invoice
                     for _, invoice in open_invs.iterrows():
                         invoice_amount = invoice["ResidualFacturaTras"]
+                        if pd.isna(invoice_amount) or invoice_amount <= tol:
+                            continue
 
-                        # Check if payment matches invoice (exact or partial)
-                        if abs(payment_amount - invoice_amount) < tol or payment_amount < invoice_amount:
+                        # Check if payment matches invoice (exact match within tolerance)
+                        if abs(payment_amount - invoice_amount) < tol:
                             # Update the rows to show they're matched
                             pay_idx = rows_df.index[rows_df["PagoKey"] == payment["PagoKey"]].tolist()
                             inv_idx = rows_df.index[rows_df["DocKey"] == invoice["DocKey"]].tolist()
 
                             if pay_idx and inv_idx:
-                                # Update match method for better tracking
                                 rows_df.loc[pay_idx[0], "MatchMethod"] = "PostProcessed"
                                 rows_df.loc[pay_idx[0], "Confidence"] = 60
+                                rows_df.loc[pay_idx[0], "Asignado"] = -payment_amount
                                 rows_df.loc[inv_idx[0], "MatchMethod"] = "PostProcessed"
                                 rows_df.loc[inv_idx[0], "Confidence"] = 60
+                                rows_df.loc[inv_idx[0], "ResidualFacturaTras"] = 0.0
                                 break
 
             all_rows.extend(rows_df.to_dict('records'))
@@ -821,7 +834,7 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
     if inv_allocs.empty:
         return pd.DataFrame(columns=["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"])
         
-    inv_allocs.sort_values(["SetID", "Fecha_pago"], inplace=True)
+    inv_allocs.sort_values(["SetID", "Fecha_pago"], inplace=True, na_position='last')
     last_status = inv_allocs.drop_duplicates(subset=["DocKey"], keep="last")
     
     pend = last_status[last_status["ResidualFacturaTras"] > tol].copy()
@@ -830,7 +843,7 @@ def build_pendientes(det: pd.DataFrame, tol: float) -> pd.DataFrame:
         return pd.DataFrame(columns=["Tercero", "DocKey", "ImportePendiente", "Fecha", "Dias"])
 
     today = pd.Timestamp.today().normalize()
-    pend["Dias"] = (today - pend["Fecha_doc"]).dt.days
+    pend["Dias"] = (today - pend["Fecha_doc"]).dt.days.clip(lower=0)
     
     # Select and rename columns as requested
     pend = pend.rename(columns={
@@ -1183,7 +1196,10 @@ def build_human_format_excel(
     company_name: Optional[str],
     period: Optional[str],
     header_row_idx: int,
-    schema: Dict[str, Optional[str]]
+    schema: Dict[str, Optional[str]],
+    ar_prefix: str = "43",
+    ap_prefix: str = "40,41",
+    tol: float = 0.01
 ) -> List[Dict]:
     """
     Generate Excel output in EXACT human format - indistinguishable from manual reconciliation.
@@ -1245,8 +1261,23 @@ def build_human_format_excel(
         tercero_val = row.get(tercero_col)
         concepto_val = str(row.get(concepto_col, '')) if pd.notna(row.get(concepto_col)) else ''
 
-        # Skip special rows
-        if concepto_val in ['Saldos anteriores', 'Total cuenta']:
+        # Skip total rows
+        if concepto_val == 'Total cuenta':
+            continue
+
+        # Handle "Saldos anteriores" — include if they have amounts
+        if concepto_val == 'Saldos anteriores':
+            debe = row.get(debe_col, 0) if pd.notna(row.get(debe_col)) else 0
+            haber = row.get(haber_col, 0) if pd.notna(row.get(haber_col)) else 0
+            if (debe or haber) and current_account:
+                account_movements[(current_account, current_tercero)].append({
+                    'fecha': row.get(fecha_col) if pd.notna(row.get(fecha_col)) else pd.Timestamp("1900-01-01"),
+                    'concepto': 'Saldos anteriores',
+                    'documento': row.get(doc_col),
+                    'debe': float(debe),
+                    'haber': float(haber),
+                    'is_saldo_anterior': True,
+                })
             continue
 
         # Check if this is an account header row (has account number)
@@ -1265,12 +1296,17 @@ def build_human_format_excel(
 
             # Check if this specific document is pending
             is_pending = False
-            if current_account.startswith('43'):  # AR - Clients
+            ap_prefixes_list = [p.strip() for p in ap_prefix.split(",")]
+            if current_account.startswith(ar_prefix):  # AR - Clients
                 is_pending = doc_num in pending_docs_ar
-            elif current_account.startswith('40'):  # AP - Suppliers
+            elif any(current_account.startswith(p) for p in ap_prefixes_list):  # AP - Suppliers
                 is_pending = doc_num in pending_docs_ap
 
-            if is_pending:
+            # Also detect impagados (returned direct debits) — these are always pending
+            concepto_upper = concepto_val.upper()
+            is_impagado = 'IMPAGAD' in concepto_upper
+
+            if is_pending or is_impagado:
                 account_movements[(current_account, current_tercero)].append({
                     'fecha': row.get(fecha_col),
                     'concepto': row.get(concepto_col),
@@ -1284,6 +1320,11 @@ def build_human_format_excel(
     for (account, tercero), movements in sorted(account_movements.items()):
         if not movements:
             continue
+
+        # Check if this account is fully reconciled (saldo = 0 within tolerance)
+        total_balance = sum(float(m.get('debe', 0)) - float(m.get('haber', 0)) for m in movements)
+        if abs(total_balance) <= tol:
+            continue  # Fully reconciled account, skip
 
         # Add blank row between accounts (and before first)
         if not first_account:
@@ -1314,6 +1355,15 @@ def build_human_format_excel(
             '_row_type': 'account_header'
         })
 
+        # Separate saldo anterior movements from regular movements
+        saldo_anterior_movs = [m for m in movements if m.get('is_saldo_anterior')]
+        regular_movs = [m for m in movements if not m.get('is_saldo_anterior')]
+
+        # Calculate saldos anteriores total from actual data
+        saldo_ant_debe = sum(float(m['debe']) for m in saldo_anterior_movs)
+        saldo_ant_haber = sum(float(m['haber']) for m in saldo_anterior_movs)
+        saldo_ant_saldo = saldo_ant_debe - saldo_ant_haber
+
         # Saldos anteriores row
         output_rows.append({
             'Cuenta': None,
@@ -1322,19 +1372,19 @@ def build_human_format_excel(
             'Fecha': None,
             'Concepto': 'Saldos anteriores',
             'Documento': None,
-            'Debe': 0,
-            'Haber': 0,
-            'Saldo': 0,
+            'Debe': saldo_ant_debe if saldo_ant_debe else 0,
+            'Haber': saldo_ant_haber if saldo_ant_haber else 0,
+            'Saldo': saldo_ant_saldo,
             'Contrapartida': None,
             '_row_type': 'saldos_anteriores'
         })
 
         # Movement rows
-        running_saldo = 0
-        total_debe = 0
-        total_haber = 0
+        running_saldo = saldo_ant_saldo
+        total_debe = saldo_ant_debe
+        total_haber = saldo_ant_haber
 
-        for mov in sorted(movements, key=lambda x: x['fecha'] if pd.notna(x['fecha']) else pd.Timestamp.min):
+        for mov in sorted(regular_movs, key=lambda x: x['fecha'] if pd.notna(x['fecha']) else pd.Timestamp.min):
             debe = float(mov['debe']) if mov['debe'] else 0
             haber = float(mov['haber']) if mov['haber'] else 0
             running_saldo += debe - haber
@@ -1558,12 +1608,21 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
         if sch["fecha"]:
             if not np.issubdtype(df[sch["fecha"]].dtype, np.datetime64):
                 df[sch["fecha"]] = pd.to_datetime(df[sch["fecha"]], dayfirst=True, errors="coerce")
-            df = df[df[sch["fecha"]].notna()].copy()
+            # Preserve "Saldos anteriores" rows that have amounts even if they lack a date
+            saldos_mask = df[sch["concepto"]].astype(str).str.contains("Saldos anteriores", na=False) if sch["concepto"] else pd.Series(False, index=df.index)
+            has_amount = df[net_col].abs() > tol if net_col else pd.Series(False, index=df.index)
+            has_date = df[sch["fecha"]].notna()
+            df = df[has_date | (saldos_mask & has_amount)].copy()
+            # Assign a very early date to "Saldos anteriores" rows so they sort first in FIFO
+            if saldos_mask.any():
+                saldos_no_date = saldos_mask & df[sch["fecha"]].isna()
+                df.loc[saldos_no_date, sch["fecha"]] = pd.Timestamp("1900-01-01")
             
         meta_info["Filas_Procesables"] = len(df)
 
+        ap_prefixes = [p.strip() for p in ap_prefix.split(",")]
         df["_collective"] = df[sch["cuenta"]].astype(str).str.strip().apply(
-            lambda s: "AR" if s.startswith(ar_prefix) else ("AP" if s.startswith(ap_prefix) else "OTROS")
+            lambda s: "AR" if s.startswith(ar_prefix) else ("AP" if any(s.startswith(p) for p in ap_prefixes) else "OTROS")
         )
         
         counts = df["_collective"].value_counts().to_dict()
@@ -1757,6 +1816,9 @@ def write_excel_with_formatting(out_sheets: Dict[str, pd.DataFrame], company_nam
                 current_row += 1
                 header_row_excel = current_row
 
+                # Pre-create date format cache to avoid creating formats inside the loop
+                date_format_cache = {}
+
                 # Write data rows with formatting
                 for idx, row in df.iterrows():
                     status = row.get('_status', 'white')
@@ -1792,10 +1854,14 @@ def write_excel_with_formatting(out_sheets: Dict[str, pd.DataFrame], company_nam
                             else:
                                 worksheet.write_number(current_row, col_num, float(value))
                         elif isinstance(value, (pd.Timestamp, pd.DatetimeTZDtype)):
-                            date_format = workbook.add_format({'num_format': 'dd/mm/yyyy'})
-                            if row_format:
-                                date_format.set_bg_color(row_format.bg_color if hasattr(row_format, 'bg_color') else None)
-                            worksheet.write_datetime(current_row, col_num, value, date_format)
+                            # Use cached date format for this row color to avoid creating formats in a loop
+                            date_fmt_key = id(row_format) if row_format else None
+                            if date_fmt_key not in date_format_cache:
+                                fmt = workbook.add_format({'num_format': 'dd/mm/yyyy'})
+                                if row_format and hasattr(row_format, 'bg_color') and row_format.bg_color:
+                                    fmt.set_bg_color(row_format.bg_color)
+                                date_format_cache[date_fmt_key] = fmt
+                            worksheet.write_datetime(current_row, col_num, value, date_format_cache[date_fmt_key])
                         else:
                             if row_format:
                                 worksheet.write(current_row, col_num, str(value), row_format)
@@ -1862,7 +1928,10 @@ def process_excel(file_content: bytes, tol: float, ar_prefix: str, ap_prefix: st
             company_name=company_name,
             period=period,
             header_row_idx=header_row_idx,
-            schema=schema
+            schema=schema,
+            ar_prefix=ar_prefix,
+            ap_prefix=ap_prefix,
+            tol=tol,
         )
         output = write_human_format_excel(output_rows, company_name, period)
     else:

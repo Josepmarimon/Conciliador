@@ -1,6 +1,6 @@
 """Pydantic schemas for authentication."""
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginRequest(BaseModel):
@@ -29,7 +29,7 @@ class PasswordChangeRequest(BaseModel):
     """Request schema for password change."""
 
     current_password: str
-    new_password: str
+    new_password: str = Field(min_length=8, description="Minimum 8 characters")
 
 
 class UserInfo(BaseModel):

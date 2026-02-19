@@ -13,29 +13,10 @@ function App() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // Show login if not authenticated
-  if (authLoading) {
-    return (
-      <div style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
-      }}>
-        <div style={{ color: '#94a3b8', fontSize: '16px' }}>Carregant...</div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return <Login />;
-  }
-
   // Settings
   const [tol, setTol] = useState(0.01);
   const [arPrefix, setArPrefix] = useState("43");
-  const [apPrefix, setApPrefix] = useState("40");
+  const [apPrefix, setApPrefix] = useState("40,41");
   const [showSettings, setShowSettings] = useState(false);
   const [isRecalculating, setIsRecalculating] = useState(false);
 
@@ -59,6 +40,25 @@ function App() {
     };
     loadStats();
   }, [result]); // Reload stats after each reconciliation
+
+  // Auth guards — AFTER all hooks
+  if (authLoading) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+      }}>
+        <div style={{ color: '#94a3b8', fontSize: '16px' }}>Carregant...</div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return <Login />;
+  }
 
   const handleFileChange = (e) => {
     if (e.target.files && e.target.files[0]) {
@@ -233,10 +233,10 @@ function App() {
                 transition: 'all 0.2s ease',
               }}
               onMouseEnter={(e) => {
-                e.target.style.background = 'rgba(239, 68, 68, 0.2)';
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
               }}
               onMouseLeave={(e) => {
-                e.target.style.background = 'rgba(239, 68, 68, 0.1)';
+                e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
               }}
             >
               <LogOut size={16} />
@@ -562,13 +562,6 @@ function App() {
         {/* Main Content Area - Apple Style */}
         <div style={{ flex: 1, padding: 'var(--spacing-8)', overflowY: 'auto', background: 'var(--color-bg-primary)' }}>
 
-          {/* Help View */}
-          {showHelp && (
-            <div className="animate-fade-in">
-              <HelpModal isOpen={true} onClose={() => setShowHelp(false)} />
-            </div>
-          )}
-
           {/* Results View */}
           {result && !showHelp && (
             <div className="animate-fade-in">
@@ -577,25 +570,25 @@ function App() {
                 {/* Clientes Metrics */}
                 <MetricCard
                   title="Clientes Conciliado"
-                  value={`${result.summary.find(r => r.Bloque === 'Clientes')?.Asignado.toLocaleString()} €`}
+                  value={`${result.summary.find(r => r.Bloque === 'Clientes')?.Asignado?.toLocaleString() ?? '0'} €`}
                   icon={TrendingUp}
                   color="var(--success)"
                 />
                 <MetricCard
                   title="Clientes Pendientes"
-                  value={result.summary.find(r => r.Bloque === 'Clientes')?.Docs_pendientes}
+                  value={result.summary.find(r => r.Bloque === 'Clientes')?.Docs_pendientes ?? 0}
                   icon={AlertTriangle}
                   color="var(--secondary)"
                 />
                 <MetricCard
                   title="Proveedores Conciliado"
-                  value={`${result.summary.find(r => r.Bloque === 'Proveedores')?.Asignado.toLocaleString()} €`}
+                  value={`${result.summary.find(r => r.Bloque === 'Proveedores')?.Asignado?.toLocaleString() ?? '0'} €`}
                   icon={TrendingUp}
                   color="var(--success)"
                 />
                 <MetricCard
                   title="Proveedores Pendientes"
-                  value={result.summary.find(r => r.Bloque === 'Proveedores')?.Docs_pendientes}
+                  value={result.summary.find(r => r.Bloque === 'Proveedores')?.Docs_pendientes ?? 0}
                   icon={AlertTriangle}
                   color="var(--secondary)"
                 />

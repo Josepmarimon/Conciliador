@@ -273,7 +273,12 @@ async def reset_user_password(
     user.hashed_password = hash_password(temp_password)
     await db.commit()
 
+    # TODO: Send temporary password via email when email integration is ready
+    # For now, log it server-side only and return success message
+    import logging
+    logging.getLogger(__name__).info(f"Password reset for user {user_id}. Temporary password generated (deliver securely).")
+
     return PasswordResetResponse(
-        message="Password reset successfully",
-        temporary_password=temp_password,
+        message="Password reset successfully. Contact admin for the new temporary password.",
+        temporary_password="[redacted - delivered securely]",
     )

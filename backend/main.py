@@ -68,7 +68,7 @@ async def conciliate_endpoint(
     file: UploadFile = File(...),
     tol: float = 0.01,
     ar_prefix: str = "43",
-    ap_prefix: str = "40",
+    ap_prefix: str = "40,41",
     justifications: Optional[str] = None,
     output_format: str = "human",
     current_user: CurrentUser = Depends(),
@@ -136,7 +136,12 @@ async def conciliate_endpoint(
         }
 
     except Exception as e:
+        import logging
         import traceback
 
+        logging.getLogger(__name__).error(f"Reconciliation error: {e}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail="Error processing file. Please check the file format and try again.",
+        )

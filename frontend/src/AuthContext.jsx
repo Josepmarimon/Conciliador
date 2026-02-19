@@ -3,6 +3,16 @@ import { login as apiLogin, logout as apiLogout, getStoredUser, getAccessToken, 
 
 const AuthContext = createContext(null);
 
+function isTokenExpired(token) {
+    try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        // Expired if exp is in the past (with 60s buffer)
+        return payload.exp * 1000 < Date.now() - 60000;
+    } catch {
+        return true;
+    }
+}
+
 export function AuthProvider({ children }) {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -12,8 +22,11 @@ export function AuthProvider({ children }) {
         const token = getAccessToken();
         const storedUser = getStoredUser();
 
-        if (token && storedUser) {
+        if (token && storedUser && !isTokenExpired(token)) {
             setUser(storedUser);
+        } else if (token) {
+            // Token expired — clear storage
+            clearTokens();
         }
         setLoading(false);
     }, []);

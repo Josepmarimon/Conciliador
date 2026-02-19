@@ -11,7 +11,7 @@ def main():
     parser.add_argument("-o", "--output", help="Ruta al Excel de salida")
     parser.add_argument("--sheet", help="Procesar solo una hoja")
     parser.add_argument("--ar-prefix", default="43", help="Prefijo Clientes (AR)")
-    parser.add_argument("--ap-prefix", default="40", help="Prefijo Proveedores (AP)")
+    parser.add_argument("--ap-prefix", default="40,41", help="Prefijo Proveedores (AP), separados por comas")
     parser.add_argument("--tol", type=float, default=0.01, help="Tolerancia")
     
     args = parser.parse_args()
