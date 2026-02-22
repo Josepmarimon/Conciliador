@@ -29,6 +29,9 @@ reconciliation_stats.json
 temp/
 output/
 
+# Nested repos
+txell_pdf/
+
 # Environment variables
 .env
 .env.local
