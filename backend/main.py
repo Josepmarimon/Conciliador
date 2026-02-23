@@ -3,15 +3,17 @@
 import base64
 import json
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Annotated, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.dependencies import CurrentUser
 from app.config import settings
-from app.database import close_db
-from app.routers import auth_router, users_router
+from app.database import close_db, get_db
+from app.models.reconciliation_log import ReconciliationLog
+from app.routers import auth_router, stats_router, users_router
 from reconciliation import process_excel
 from stats import get_stats, increment_reconciliation_count
 
@@ -44,6 +46,7 @@ app.add_middleware(
 # Include routers
 app.include_router(auth_router)
 app.include_router(users_router)
+app.include_router(stats_router)
 
 
 @app.get("/")
@@ -66,6 +69,7 @@ def get_statistics():
 @app.post("/conciliate")
 async def conciliate_endpoint(
     current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
     file: UploadFile = File(...),
     tol: float = 0.01,
     ar_prefix: str = "43",
@@ -120,6 +124,33 @@ async def conciliate_endpoint(
 
         # Increment statistics
         increment_reconciliation_count(total_rows)
+
+        # Count matched and pending from details
+        details = response_data.get("details", {})
+        matched_count = len(details.get("Clientes_Detalle", [])) + len(
+            details.get("Proveedores_Detalle", [])
+        )
+        pending_count = len(details.get("Pendientes_Clientes", [])) + len(
+            details.get("Pendientes_Proveedores", [])
+        )
+        unassigned_count = total_rows - matched_count - pending_count
+        if unassigned_count < 0:
+            unassigned_count = 0
+
+        # Save reconciliation log
+        log = ReconciliationLog(
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            filename=file.filename,
+            company_name=response_data.get("company_name"),
+            period=response_data.get("period"),
+            rows_processed=total_rows,
+            matched_count=matched_count,
+            pending_count=pending_count,
+            unassigned_count=unassigned_count,
+        )
+        db.add(log)
+        await db.commit()
 
         # Encode Excel file as base64
         b64_file = base64.b64encode(output_excel.getvalue()).decode()
