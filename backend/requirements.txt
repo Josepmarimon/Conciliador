@@ -25,4 +25,5 @@ passlib[bcrypt]
 
 # Configuration
 pydantic-settings
+email-validator
 python-dotenv
