@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # CORS
-    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,https://conciliador-web.onrender.com,https://conciliador-frontend.onrender.com"
+    CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173,https://conciliador-web.onrender.com,https://conciliador-frontend.onrender.com,https://conciliador-frontend-ziw9.onrender.com"
 
     @model_validator(mode="after")
     def validate_settings(self) -> "Settings":

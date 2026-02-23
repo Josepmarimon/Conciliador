@@ -45,7 +45,7 @@ services:
       - key: JWT_SECRET_KEY
         generateValue: true  # Render generates a random 64-char secret
       - key: CORS_ORIGINS
-        value: "https://conciliador-web.onrender.com,https://conciliador-frontend.onrender.com,http://localhost:5173"
+        value: "https://conciliador-web.onrender.com,https://conciliador-frontend.onrender.com,https://conciliador-frontend-ziw9.onrender.com,http://localhost:5173"
 
 # =============================================================================
 # DATABASES
