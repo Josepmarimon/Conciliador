@@ -33,8 +33,8 @@ services:
     name: conciliador-api
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt && alembic upgrade head && python scripts/seed_admin.py
-    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r requirements.txt
+    startCommand: alembic upgrade head && python scripts/seed_admin.py && uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     plan: starter  # $7/month - upgrade to 'standard' for more resources
     envVars:
