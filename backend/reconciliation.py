@@ -5,6 +5,27 @@ import io
 from typing import List, Dict, Tuple, Optional, Any
 from difflib import SequenceMatcher
 
+def _coerce_european_numbers(series: pd.Series) -> pd.Series:
+    """Auto-detect European number format (1.234,56) and convert to standard floats.
+
+    Samples up to 20 non-null string values. If >50% match the European pattern
+    (digits with comma followed by exactly 2 decimal digits), convert the entire
+    series: remove dots (thousands separator) and replace comma with dot.
+    """
+    sample = series.dropna().astype(str).head(20)
+    if sample.empty:
+        return pd.to_numeric(series, errors="coerce")
+
+    european_pattern = re.compile(r'\d[,]\d{2}$')
+    european_count = sum(1 for v in sample if european_pattern.search(v.strip()))
+
+    if european_count > len(sample) * 0.5:
+        converted = series.astype(str).str.replace('.', '', regex=False).str.replace(',', '.', regex=False)
+        return pd.to_numeric(converted, errors="coerce")
+
+    return pd.to_numeric(series, errors="coerce")
+
+
 def normalize_cols(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -102,6 +123,31 @@ def detect_schema(df: pd.DataFrame) -> Dict[str, Optional[str]]:
             }
     return schema
 
+_WITHHOLDING_RATES = (0.07, 0.15, 0.19, 0.21)
+
+_REFERENCE_STOPLIST = frozenset({
+    # Transaction types
+    "PAGO", "COBRO", "TRANSFER", "TRANSF", "INGRESO", "RECIBO", "REMESA",
+    "LIQUIDACION", "LIQUIDACIÓ", "ABONO", "CARGO", "NÓMINA", "NOMINA",
+    "DOMICILIACION", "DOMICILIACIÓ", "ADEUDO", "RETENCION", "RETENCIÓN",
+    "IMPUESTO", "IVA", "IRPF",
+    # Legal forms
+    "SL", "SA", "SLU", "SCP", "SLL", "CB", "AIE", "SAU", "COOP", "SLNE",
+    # Months (Spanish/Catalan)
+    "ENERO", "FEBRERO", "MARZO", "ABRIL", "MAYO", "JUNIO",
+    "JULIO", "AGOSTO", "SEPTIEMBRE", "OCTUBRE", "NOVIEMBRE", "DICIEMBRE",
+    "GENER", "FEBRER", "MARÇ", "MAIG", "JUNY", "JULIOL", "AGOST",
+    "SETEMBRE", "NOVEMBRE", "DESEMBRE",
+    # Prepositions / articles
+    "DEL", "LOS", "LAS", "UNA", "UNO", "POR", "PARA", "CON", "SIN",
+    "ELS", "LES", "PER", "AMB", "DELS", "ALS",
+    # Accounting terms
+    "FACTURA", "FACT", "FRA", "CUENTA", "COMPTE", "TOTAL", "SALDO",
+    "PENDIENTE", "PENDENT", "TRIMESTRE", "MES", "AÑO", "ANY",
+    "BANCO", "BANC", "CAJA", "COMISION", "COMISSIÓ", "GASTOS", "DESPESES",
+})
+
+
 def extract_invoice_references(text: str) -> List[str]:
     """Extract potential invoice references from text using common patterns, including ranges"""
     if not text:
@@ -186,7 +232,7 @@ def extract_invoice_references(text: str) -> List[str]:
     # Also include the full text split by common separators for partial matching
     # This helps when invoice ref doesn't follow standard patterns
     text_parts = re.split(r'[\s,;/\-]+', text)
-    references.extend([p for p in text_parts if len(p) >= 2 and not p.isspace()])
+    references.extend([p for p in text_parts if len(p) >= 3 and not p.isspace() and p not in _REFERENCE_STOPLIST])
 
     # Remove duplicates while preserving order
     seen = set()
@@ -397,7 +443,7 @@ class Reconciler:
             for idx, inv in enumerate(self.open_invoices):
                 if inv["remaining"] <= self.tol:
                     continue
-                if abs(inv["remaining"] - payment_left) <= self.tol:
+                if abs(inv["remaining"] - payment_left) <= max(self.tol, payment_left * 0.001):
                     candidates.append(idx)
 
             if candidates:
@@ -413,6 +459,38 @@ class Reconciler:
                 confidence = 90 if days_diff <= 30 else 85 if days_diff <= 60 else 80
                 matches.append((best_match_idx, take, "Exact", confidence))
                 self.open_invoices[best_match_idx]["remaining"] -= take
+                payment_left -= take
+
+        # --- Phase 2.5: Withholding Tax (IRPF) Match ---
+        # Check if payment equals invoice * (1 - withholding_rate)
+        if payment_left > self.tol:
+            best_wh_match = None  # (inv_idx, rate, confidence)
+
+            for idx, inv in enumerate(self.open_invoices):
+                if inv["remaining"] <= self.tol:
+                    continue
+
+                # Try each withholding rate, lowest first (less assumption)
+                for rate in _WITHHOLDING_RATES:
+                    expected_payment = inv["remaining"] * (1 - rate)
+                    if abs(expected_payment - payment_left) <= max(self.tol, payment_left * 0.001):
+                        # Date proximity bonus
+                        days_diff = 999
+                        if payment_date and payment_date != pd.NaT and inv["fecha"] and inv["fecha"] != pd.NaT:
+                            days_diff = abs((payment_date - inv["fecha"]).days)
+                        confidence = 88 if days_diff <= 30 else 85 if days_diff <= 60 else 82
+
+                        if best_wh_match is None or confidence > best_wh_match[2]:
+                            best_wh_match = (idx, rate, confidence)
+                        break  # lowest matching rate wins for this invoice
+
+            if best_wh_match:
+                wh_idx, wh_rate, wh_confidence = best_wh_match
+                inv = self.open_invoices[wh_idx]
+                # Take the payment amount from the invoice (residual = withheld portion)
+                take = payment_left
+                matches.append((wh_idx, take, "WithholdingTax", wh_confidence))
+                inv["remaining"] -= take
                 payment_left -= take
 
         # --- Phase 3: Combined Amount Match (Multiple Invoices) ---
@@ -497,22 +575,24 @@ class Reconciler:
                 inv_date = inv["fecha"]
                 if inv_date and inv_date != pd.NaT:
                     days_diff = (payment_date - inv_date).days
-                    # Payment within 0-45 days after invoice
-                    if 0 <= days_diff <= 45:
+                    # Payment within -30 to 45 days of invoice (allows advance payments)
+                    if -30 <= days_diff <= 45:
                         # Check if amount is reasonably close (within 20%)
                         amount_ratio = payment_left / inv["remaining"] if inv["remaining"] > 0 else 0
                         if 0.8 <= amount_ratio <= 1.2:
                             proximity_candidates.append((idx, days_diff, amount_ratio))
 
             if proximity_candidates:
-                # Sort by days difference (prefer closer dates)
-                proximity_candidates.sort(key=lambda x: x[1])
+                # Sort by absolute days difference (prefer closest dates)
+                proximity_candidates.sort(key=lambda x: abs(x[1]))
                 best_idx, days_diff, amount_ratio = proximity_candidates[0]
 
                 if self.open_invoices[best_idx]["remaining"] > self.tol:
                     take = min(self.open_invoices[best_idx]["remaining"], payment_left)
                     # Confidence based on date proximity and amount match
-                    date_confidence = 75 - (days_diff * 0.5)  # Max 75, decreases with days
+                    # Advance payments (days_diff < 0) use lower base confidence
+                    base_confidence = 70 if days_diff < 0 else 75
+                    date_confidence = base_confidence - (abs(days_diff) * 0.5)
                     amount_confidence = 70 if 0.95 <= amount_ratio <= 1.05 else 65
                     confidence = min(date_confidence, amount_confidence)
                     matches.append((best_idx, take, "DateProximity", confidence))
@@ -766,6 +846,60 @@ def reconcile_fifo(df: pd.DataFrame, tol: float = 0.01) -> pd.DataFrame:
                                 rows_df.loc[inv_idx[0], "ResidualFacturaTras"] = 0.0
                                 break
 
+            # Post-processing pass 2: Credit note + payment combination
+            # Among remaining unallocated payments, identify credit notes by keywords.
+            # Try: regular_payment + credit_note ≈ open_invoice (1+1=1 only)
+            _CREDIT_NOTE_KEYWORDS = ("ABONO", "N/C", "NOTA CREDITO", "NOTA CRÈDIT",
+                                     "RECTIFICATIVA", "DEVOLUCION", "DEVOLUCIÓ", "CREDIT NOTE")
+
+            still_unallocated = rows_df[rows_df["MatchMethod"] == "Unallocated"].copy()
+            if len(still_unallocated) >= 2:
+                # Split into credit notes and regular payments
+                def _is_credit_note(row):
+                    concept = str(row.get("Concepto_pago", "")).upper()
+                    doc = str(row.get("Documento_pago", "")).upper()
+                    return any(kw in concept or kw in doc for kw in _CREDIT_NOTE_KEYWORDS)
+
+                credit_notes = still_unallocated[still_unallocated.apply(_is_credit_note, axis=1)]
+                regular_payments = still_unallocated[~still_unallocated.apply(_is_credit_note, axis=1)]
+
+                for _, cn in credit_notes.iterrows():
+                    cn_amount = abs(cn["Asignado"])
+                    for _, reg in regular_payments.iterrows():
+                        # Skip if already matched in this loop
+                        reg_idx_list = rows_df.index[rows_df["PagoKey"] == reg["PagoKey"]].tolist()
+                        if reg_idx_list and rows_df.loc[reg_idx_list[0], "MatchMethod"] != "Unallocated":
+                            continue
+
+                        reg_amount = abs(reg["Asignado"])
+                        net_amount = reg_amount - cn_amount  # credit note reduces payment
+
+                        if net_amount <= tol:
+                            continue
+
+                        # Find an open invoice matching the net amount
+                        open_invs = rows_df[rows_df["MatchMethod"] == "Open"]
+                        for _, inv in open_invs.iterrows():
+                            inv_amount = inv["ResidualFacturaTras"]
+                            if pd.isna(inv_amount) or inv_amount <= tol:
+                                continue
+
+                            if abs(net_amount - inv_amount) <= max(tol, inv_amount * 0.01):
+                                # Found a match: reg_payment - credit_note ≈ invoice
+                                pay_idx = rows_df.index[rows_df["PagoKey"] == reg["PagoKey"]].tolist()
+                                cn_idx = rows_df.index[rows_df["PagoKey"] == cn["PagoKey"]].tolist()
+                                inv_idx = rows_df.index[rows_df["DocKey"] == inv["DocKey"]].tolist()
+
+                                if pay_idx and cn_idx and inv_idx:
+                                    rows_df.loc[pay_idx[0], "MatchMethod"] = "PostProcessed"
+                                    rows_df.loc[pay_idx[0], "Confidence"] = 55
+                                    rows_df.loc[cn_idx[0], "MatchMethod"] = "PostProcessed"
+                                    rows_df.loc[cn_idx[0], "Confidence"] = 55
+                                    rows_df.loc[inv_idx[0], "MatchMethod"] = "PostProcessed"
+                                    rows_df.loc[inv_idx[0], "Confidence"] = 55
+                                    rows_df.loc[inv_idx[0], "ResidualFacturaTras"] = 0.0
+                                break  # one match per credit note
+
             all_rows.extend(rows_df.to_dict('records'))
         else:
             all_rows.extend(reconciler.out_rows)
@@ -975,6 +1109,7 @@ def translate_match_method(method: str) -> str:
     translations = {
         "Reference": "Referència",
         "Exact": "Import exacte",
+        "WithholdingTax": "Retenció IRPF",
         "CombinedAmount": "Import combinat",
         "DateProximity": "Proximitat dates",
         "FIFO": "FIFO",
@@ -1584,8 +1719,8 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
             
         for c in [sch["debe"], sch["haber"], sch["saldo"]]:
             if c:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-                
+                df[c] = _coerce_european_numbers(df[c])
+
         net_col = None
         if sch["debe"] and sch["haber"]:
             net_col = "_neto_"
@@ -1594,7 +1729,7 @@ def generate_reconciliation_data(file_content: bytes, tol: float, ar_prefix: str
             importe_cols = find_cols(df, [r"importe|monto|amount"])
             if len(importe_cols)==1:
                 net_col = importe_cols[0]
-                df[net_col] = pd.to_numeric(df[net_col], errors="coerce")
+                df[net_col] = _coerce_european_numbers(df[net_col])
             else:
                 net_col = None
                 

@@ -65,7 +65,7 @@ function HelpModal({ isOpen, onClose }) {
                         </h3>
                         <p style={{ fontSize: '0.95rem', lineHeight: '1.6', color: '#cbd5e1', margin: 0 }}>
                             El sistema empareja automáticamente <strong>facturas</strong> (importes positivos) con <strong>pagos</strong> (importes negativos)
-                            utilizando un algoritmo inteligente en <strong>3 fases secuenciales</strong>. Cada fase tiene un método diferente para
+                            utilizando un algoritmo inteligente en <strong>5 fases secuenciales</strong>. Cada fase tiene un método diferente para
                             encontrar la mejor coincidencia. Los resultados se organizan por <strong>Clientes (AR)</strong> y <strong>Proveedores (AP)</strong>,
                             mostrando tanto los emparejamientos exitosos como los pendientes que requieren atención.
                         </p>
@@ -200,6 +200,71 @@ function HelpModal({ isOpen, onClose }) {
                         </div>
                     </div>
 
+                    {/* Phase 2.5: WithholdingTax */}
+                    <div style={{ marginBottom: '2rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+                            <div style={{
+                                background: 'linear-gradient(135deg, #f59e0b 0%, #fbbf24 100%)',
+                                borderRadius: '8px',
+                                width: '36px',
+                                height: '36px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontWeight: '700',
+                                fontSize: '0.9rem',
+                                color: '#000'
+                            }}>2.5</div>
+                            <h3 style={{ fontSize: '1.25rem', fontWeight: '600', margin: 0, color: 'white' }}>
+                                🏛️ Retención IRPF (WithholdingTax)
+                            </h3>
+                        </div>
+
+                        <div style={{
+                            background: 'rgba(0, 0, 0, 0.3)',
+                            borderRadius: '0.75rem',
+                            padding: '1.5rem',
+                            borderLeft: '4px solid #f59e0b'
+                        }}>
+                            <p style={{ fontSize: '0.95rem', lineHeight: '1.6', color: '#cbd5e1', marginBottom: '1rem' }}>
+                                Detecta pagos que corresponden a facturas con <strong>retención de IRPF</strong> aplicada.
+                                Prueba las tasas estándar españolas (7%, 15%, 19%, 21%) para ver si el pago coincide con
+                                <strong> factura × (1 - tasa)</strong>. El residual representa la porción retenida por Hacienda.
+                            </p>
+
+                            <div style={{
+                                background: 'rgba(245, 158, 11, 0.1)',
+                                border: '1px solid rgba(245, 158, 11, 0.3)',
+                                borderRadius: '0.5rem',
+                                padding: '1rem',
+                                fontFamily: 'monospace',
+                                fontSize: '0.85rem'
+                            }}>
+                                <div style={{ color: '#fbbf24', marginBottom: '0.5rem' }}>✓ Ejemplo:</div>
+                                <div style={{ color: '#94a3b8', marginBottom: '0.25rem' }}>
+                                    <strong>Factura:</strong> 1,000.00 € pendiente
+                                </div>
+                                <div style={{ color: '#94a3b8', marginBottom: '0.5rem' }}>
+                                    <strong>Pago:</strong> 850.00 € (retención 15% IRPF)
+                                </div>
+                                <div style={{ color: '#f59e0b', fontWeight: '600' }}>
+                                    → ✅ MATCH por WithholdingTax (850.00 €) — Residual: 150.00 € (retenido)
+                                </div>
+                            </div>
+
+                            <div style={{
+                                marginTop: '1rem',
+                                padding: '0.75rem',
+                                background: 'rgba(59, 130, 246, 0.1)',
+                                borderRadius: '0.5rem',
+                                fontSize: '0.85rem',
+                                color: '#93c5fd'
+                            }}>
+                                <strong>💡 Ventaja:</strong> Resuelve automáticamente pagos a profesionales y autónomos donde se aplica retención fiscal
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Phase 3 */}
                     <div style={{ marginBottom: '2rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
@@ -281,17 +346,29 @@ function HelpModal({ isOpen, onClose }) {
                         <h3 style={{ fontSize: '1.1rem', fontWeight: '600', margin: '0 0 1rem 0', color: '#fbbf24' }}>
                             📋 Orden de Prioridad del Algoritmo
                         </h3>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.95rem', color: '#cbd5e1' }}>
-                            <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '0.5rem 1rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: '#cbd5e1', flexWrap: 'wrap' }}>
+                            <div style={{ background: 'rgba(16, 185, 129, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
                                 1. Reference
                             </div>
-                            <ArrowRight size={20} color="#fbbf24" />
-                            <div style={{ background: 'rgba(59, 130, 246, 0.2)', padding: '0.5rem 1rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                            <ArrowRight size={16} color="#fbbf24" />
+                            <div style={{ background: 'rgba(59, 130, 246, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
                                 2. Exact
                             </div>
-                            <ArrowRight size={20} color="#fbbf24" />
-                            <div style={{ background: 'rgba(168, 85, 247, 0.2)', padding: '0.5rem 1rem', borderRadius: '0.5rem', fontWeight: '600' }}>
-                                3. FIFO
+                            <ArrowRight size={16} color="#fbbf24" />
+                            <div style={{ background: 'rgba(245, 158, 11, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                                2.5 IRPF
+                            </div>
+                            <ArrowRight size={16} color="#fbbf24" />
+                            <div style={{ background: 'rgba(251, 146, 60, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                                3. Combined
+                            </div>
+                            <ArrowRight size={16} color="#fbbf24" />
+                            <div style={{ background: 'rgba(59, 130, 246, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                                4. Date
+                            </div>
+                            <ArrowRight size={16} color="#fbbf24" />
+                            <div style={{ background: 'rgba(168, 85, 247, 0.2)', padding: '0.4rem 0.75rem', borderRadius: '0.5rem', fontWeight: '600' }}>
+                                5. FIFO
                             </div>
                         </div>
                     </div>

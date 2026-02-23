@@ -850,6 +850,7 @@ function MatchesList({ matches, justifications, setJustifications }) {
             <option value="all">Todos</option>
             <option value="Reference">Referencia</option>
             <option value="Exact">Exacto</option>
+            <option value="WithholdingTax">Retenció IRPF</option>
             <option value="CombinedAmount">Import Combinat</option>
             <option value="DateProximity">Proximidad Fecha</option>
             <option value="FIFO">FIFO</option>
@@ -1147,20 +1148,23 @@ function MatchesList({ matches, justifications, setJustifications }) {
                                       background:
                                         payment.MatchMethod === 'Reference' ? 'rgba(16, 185, 129, 0.2)' :
                                           payment.MatchMethod === 'Exact' ? 'rgba(16, 185, 129, 0.2)' :
-                                            payment.MatchMethod === 'CombinedAmount' ? 'rgba(251, 146, 60, 0.2)' :
-                                              payment.MatchMethod === 'DateProximity' ? 'rgba(59, 130, 246, 0.2)' :
-                                                'rgba(168, 85, 247, 0.2)',
+                                            payment.MatchMethod === 'WithholdingTax' ? 'rgba(245, 158, 11, 0.2)' :
+                                              payment.MatchMethod === 'CombinedAmount' ? 'rgba(251, 146, 60, 0.2)' :
+                                                payment.MatchMethod === 'DateProximity' ? 'rgba(59, 130, 246, 0.2)' :
+                                                  'rgba(168, 85, 247, 0.2)',
                                       color:
                                         payment.MatchMethod === 'Reference' ? '#10B981' :
                                           payment.MatchMethod === 'Exact' ? '#10B981' :
-                                            payment.MatchMethod === 'CombinedAmount' ? '#FB923C' :
-                                              payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
-                                                '#A855F7',
+                                            payment.MatchMethod === 'WithholdingTax' ? '#F59E0B' :
+                                              payment.MatchMethod === 'CombinedAmount' ? '#FB923C' :
+                                                payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
+                                                  '#A855F7',
                                       border: `1px solid ${payment.MatchMethod === 'Reference' ? '#10B981' :
                                         payment.MatchMethod === 'Exact' ? '#10B981' :
-                                          payment.MatchMethod === 'CombinedAmount' ? '#FB923C' :
-                                            payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
-                                              '#A855F7'
+                                          payment.MatchMethod === 'WithholdingTax' ? '#F59E0B' :
+                                            payment.MatchMethod === 'CombinedAmount' ? '#FB923C' :
+                                              payment.MatchMethod === 'DateProximity' ? '#3B82F6' :
+                                                '#A855F7'
                                         }`,
                                       textTransform: 'uppercase'
                                     }}>
