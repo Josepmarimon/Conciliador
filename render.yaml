@@ -21,10 +21,7 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_URL
-        fromService:
-          name: conciliador-api
-          type: web
-          property: url
+        sync: false  # Set manually in Render dashboard after backend deploys
 
   # =============================================================================
   # BACKEND API - FastAPI Web Service
