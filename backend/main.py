@@ -65,13 +65,13 @@ def get_statistics():
 
 @app.post("/conciliate")
 async def conciliate_endpoint(
+    current_user: CurrentUser,
     file: UploadFile = File(...),
     tol: float = 0.01,
     ar_prefix: str = "43",
     ap_prefix: str = "40,41",
     justifications: Optional[str] = None,
     output_format: str = "human",
-    current_user: CurrentUser = Depends(),
 ):
     """
     Process an Excel file for reconciliation.
