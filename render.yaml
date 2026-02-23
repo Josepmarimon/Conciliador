@@ -33,7 +33,7 @@ services:
     name: conciliador-api
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && alembic upgrade head && python scripts/seed_admin.py
     startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /
     plan: starter  # $7/month - upgrade to 'standard' for more resources
@@ -42,59 +42,21 @@ services:
         value: "3.11"
       - key: ENVIRONMENT
         value: production
-      # Database connection (uncomment when adding PostgreSQL)
-      # - key: DATABASE_URL
-      #   fromDatabase:
-      #     name: conciliador-db
-      #     property: connectionString
-      # Redis connection (uncomment when adding Redis)
-      # - key: REDIS_URL
-      #   fromService:
-      #     name: conciliador-redis
-      #     type: redis
-      #     property: connectionString
-      # CORS - set manually in Render dashboard
+      - key: DATABASE_URL
+        fromDatabase:
+          name: conciliador-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true  # Render generates a random 64-char secret
       - key: CORS_ORIGINS
         sync: false
 
 # =============================================================================
-# DATABASES & SERVICES (uncomment when ready for SaaS)
+# DATABASES
 # =============================================================================
 
-# databases:
-#   - name: conciliador-db
-#     plan: starter  # $7/month, 1GB storage
-#     postgresMajorVersion: 16
-#     ipAllowList: []  # Allow all IPs (Render services)
-
-# Redis for job queue and caching
-# services:
-#   - type: redis
-#     name: conciliador-redis
-#     plan: starter  # $10/month, 25MB
-#     maxmemoryPolicy: allkeys-lru
-#     ipAllowList: []
-
-# =============================================================================
-# BACKGROUND WORKER (uncomment when adding async processing)
-# =============================================================================
-
-#   - type: worker
-#     name: conciliador-worker
-#     runtime: python
-#     rootDir: backend
-#     buildCommand: pip install -r requirements.txt
-#     startCommand: celery -A tasks worker --loglevel=info
-#     plan: starter
-#     envVars:
-#       - key: PYTHON_VERSION
-#         value: "3.11"
-#       - key: DATABASE_URL
-#         fromDatabase:
-#           name: conciliador-db
-#           property: connectionString
-#       - key: REDIS_URL
-#         fromService:
-#           name: conciliador-redis
-#           type: redis
-#           property: connectionString
+databases:
+  - name: conciliador-db
+    plan: starter  # $7/month, 1GB storage
+    postgresMajorVersion: 16
+    ipAllowList: []  # Allow all IPs (Render services)

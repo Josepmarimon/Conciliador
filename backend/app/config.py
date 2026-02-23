@@ -32,8 +32,16 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @model_validator(mode="after")
-    def validate_jwt_secret_in_production(self) -> "Settings":
-        """Ensure JWT secret is not the default in production."""
+    def validate_settings(self) -> "Settings":
+        """Fix DATABASE_URL for asyncpg and validate production secrets."""
+        # Convert Render's postgres:// URL to asyncpg format
+        url = self.DATABASE_URL
+        if url.startswith("postgres://"):
+            self.DATABASE_URL = url.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgresql://") and "+asyncpg" not in url:
+            self.DATABASE_URL = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+        # Ensure JWT secret is not the default in production
         if self.ENVIRONMENT == "production" and self.JWT_SECRET_KEY == "dev-secret-key-change-in-production":
             raise ValueError(
                 "JWT_SECRET_KEY must be changed from default in production. "
