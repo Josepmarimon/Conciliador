@@ -9,13 +9,15 @@ from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import func, select
+
 from app.auth.dependencies import CurrentUser
 from app.config import settings
 from app.database import close_db, get_db
 from app.models.reconciliation_log import ReconciliationLog
 from app.routers import auth_router, stats_router, users_router
 from reconciliation import process_excel
-from stats import get_stats, increment_reconciliation_count
+from stats import increment_reconciliation_count
 
 
 @asynccontextmanager
@@ -52,18 +54,25 @@ app.include_router(stats_router)
 @app.get("/")
 def read_root():
     """Health check endpoint."""
-    stats = get_stats()
     return {
         "message": "Conciliador FIFO API is running",
         "version": "2.0.0",
-        "total_reconciliations": stats["total_reconciliations"],
     }
 
 
 @app.get("/stats")
-def get_statistics():
-    """Get usage statistics (public endpoint)."""
-    return get_stats()
+async def get_statistics(db: Annotated[AsyncSession, Depends(get_db)]):
+    """Get usage statistics from DB (public endpoint)."""
+    total_reconciliations = await db.scalar(
+        select(func.count()).select_from(ReconciliationLog)
+    )
+    total_rows = await db.scalar(
+        select(func.sum(ReconciliationLog.rows_processed))
+    )
+    return {
+        "total_reconciliations": total_reconciliations or 0,
+        "total_rows_processed": total_rows or 0,
+    }
 
 
 @app.post("/conciliate")
